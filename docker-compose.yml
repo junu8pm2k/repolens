@@ -1,0 +1,79 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: repolens-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-repolens}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-repolens}
+      POSTGRES_DB: ${POSTGRES_DB:-repolens}
+    ports:
+      # 本机 PostgreSQL 18 服务占用了 5432，这里映射到 5433 避免冲突；.env 中 DATABASE_URL 同步使用 5433。
+      - "5433:5432"
+    volumes:
+      - repolens_postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_pgvector.sql:/docker-entrypoint-initdb.d/01-init-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-repolens} -d ${POSTGRES_DB:-repolens}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: repolens-ai-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    profiles:
+      - optional
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: repolens-ai-etcd
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir=/etcd
+    volumes:
+      - repolens_etcd_data:/etcd
+
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    container_name: repolens-ai-minio
+    restart: unless-stopped
+    # Chainguard 镜像默认以非 root(65532) 运行，而命名卷默认是 root 所有；本地开发用 root 运行以允许写入数据卷。
+    user: "0:0"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    # Chainguard 镜像的 entrypoint 已经是 /usr/bin/minio，这里直接传子命令，不能再重复写 "minio"。
+    command: ["server", "/minio_data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - repolens_minio_data:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.5.4
+    container_name: repolens-ai-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    depends_on:
+      - etcd
+      - minio
+
+volumes:
+  repolens_postgres_data:
+  repolens_etcd_data:
+  repolens_minio_data:

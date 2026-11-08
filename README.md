@@ -136,3 +136,8 @@ Content-Type: application/json
 - 对 Judge 超时或缺失指标点击“仅重试异常评分”，复用已经保存的回答和证据，不重新运行 ChatAgent；
 - 选择两个相同评测集 Hash、Ragas/Judge 配置和 Top-K 的结果做回归对比；
 - 生成 `create_issue` 类型的 ActionDraft，把失败 Case、证据和建议带入人工确认流程，不会直接写入 GitHub。
+
+### GitHub Actions
+
+- **Backend CI** 在 PR 更新和推送到 `main` 时跑后端 Pytest，使用 SQLite、确定性 embedding 和测试替身。
+- **RAGAS Eval** 在 Actions 页面手动运行。将 DeepSeek Key 配为仓库 Secret `LLM_API_KEY`。评测使用仓库内的员工手册固定用例、Qwen Embedding、Milvus 和 DeepSeek Judge。运行摘要显示门禁状态和分数，`ragas-eval` 产物包含逐题证据、工具轨迹和诊断。对比两轮结果时可检查评测集和手册的 SHA-256。

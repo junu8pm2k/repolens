@@ -1,0 +1,32 @@
+{
+  "name": "ci-handbook",
+  "label": "CI 员工手册固定评测",
+  "description": "使用仓库中的员工手册检验 ChatAgent 的知识库检索和有据回答。",
+  "schema_version": 1,
+  "repository_names": ["repolens-ci/handbook"],
+  "cases": [
+    {
+      "id": "annual-leave",
+      "source_file": "rag_employee_handbook.md",
+      "question": "根据员工手册，正式员工每年有多少天带薪年假？要提前几个工作日在哪个系统申请？数字用阿拉伯数字。",
+      "reference": "正式员工每个自然年有 10 天带薪年假，至少提前 3 个工作日在 OA 系统提交申请。",
+      "must_include": ["OA"],
+      "answer_regex": "(?s)(?=.*(?<!\\d)10(?!\\d))(?=.*(?<!\\d)3(?!\\d)).+"
+    },
+    {
+      "id": "remote-work",
+      "source_file": "rag_employee_handbook.md",
+      "question": "根据员工手册，每周最多可以申请几天远程办公？最晚什么时候提交？数字用阿拉伯数字。",
+      "reference": "每周最多申请 2 天远程办公，须在前一工作日 18:00 前提交。",
+      "must_include": ["18:00"],
+      "answer_regex": "(?s)(?=.*(?<!\\d)2(?!\\d)).+"
+    },
+    {
+      "id": "p0-response",
+      "source_file": "rag_employee_handbook.md",
+      "question": "根据员工手册，发生 P0 事故后值班工程师应在几分钟内响应？几分钟内建协作群？数字用阿拉伯数字。",
+      "reference": "值班工程师应在 5 分钟内响应，并在 15 分钟内建立事故协作群。",
+      "answer_regex": "(?s)(?=.*(?<!\\d)5(?!\\d))(?=.*(?<!\\d)15(?!\\d)).+"
+    }
+  ]
+}

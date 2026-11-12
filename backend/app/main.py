@@ -39,7 +39,16 @@ def _cors_origins() -> list[str]:
 def _cors_origin_regex() -> str | None:
     if settings.app_env.lower() == "production":
         return None
-    return r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
+    # 开发环境除 localhost/127.0.0.1 外，也放行局域网 IP 与单段主机名：
+    # Next.js 启动时会同时打印 Network 地址（例如 http://192.168.10.1:3000），
+    # 从该地址打开前端时同样需要能直连本机后端，否则 CORS 预检会返回 400。
+    private_ipv4 = (
+        r"(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+        r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+        r"|192\.168\.\d{1,3}\.\d{1,3})"
+    )
+    hostname = r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    return rf"^https?://(localhost|127\.0\.0\.1|\[::1\]|{private_ipv4}|{hostname})(:\d+)?$"
 
 
 def create_app() -> FastAPI:

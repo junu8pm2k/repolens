@@ -36,6 +36,15 @@ def test_clone_target_from_parent_rejects_occupied_directory(tmp_path) -> None:
         _clone_target_from_parent(str(tmp_path), "codex")
 
 
+def test_clone_target_from_parent_creates_missing_parent_directories(tmp_path) -> None:
+    parent = tmp_path / "downloads" / "nested"
+    target = _clone_target_from_parent(str(parent), "codex")
+
+    assert parent.is_dir()
+    assert target == (parent / "codex").resolve()
+    assert list(parent.iterdir()) == []
+
+
 def test_repo_connect_request_uses_a_small_bounded_initial_sync() -> None:
     payload = RepoConnectRequest(owner="openai", repo="openai-quickstart-python")
 

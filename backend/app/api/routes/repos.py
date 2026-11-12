@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -138,10 +139,40 @@ def _effective_api_base_url(provider: str, raw_base_url: str | None, remote_host
     return None
 
 
+def _ensure_directory_writable(path: Path, label: str) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label}无法创建：{path}。请检查路径是否有效，或留空使用默认托管目录。原始错误：{exc}",
+        ) from exc
+    probe = path / f".repolens-write-probe-{uuid.uuid4().hex}"
+    try:
+        probe.mkdir()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{label}当前后端进程不可写：{path}。"
+                "可留空使用默认托管目录（代码会下载到项目内 .data/repos），"
+                "或改用“本地仓库”连接已有代码。"
+                f"原始错误：{exc}"
+            ),
+        ) from exc
+    finally:
+        try:
+            probe.rmdir()
+        except OSError:
+            pass
+
+
 def _clone_target_from_parent(raw_parent: str, repo_name: str) -> Path:
     parent = _resolve_user_path(raw_parent, "clone_parent_dir")
     if parent.exists() and not parent.is_dir():
         raise HTTPException(status_code=400, detail=f"Download parent path is not a directory: {parent}")
+    # 连接阶段先确认父目录可用，避免后台 checkout 失败后留下“已连接但没有代码”的项目。
+    _ensure_directory_writable(parent, "下载父目录")
 
     target = (parent / repo_name).resolve()
     if target.exists() and not target.is_dir():

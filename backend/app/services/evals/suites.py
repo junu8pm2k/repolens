@@ -34,25 +34,27 @@ def _read_suite(path: Path) -> tuple[dict[str, Any], str]:
     return payload, hashlib.sha256(raw).hexdigest()
 
 
-def _matching_documents(db: Session, repo_id: Any, source_file: str) -> list[Document]:
-    expected = Path(source_file).name.casefold()
+def _indexed_source_ids(db: Session, repo_id: Any) -> dict[str, list[str]]:
     documents = (
-        db.query(Document)
+        db.query(Document.id, Document.source_id, Document.meta)
         .filter(Document.repo_id == repo_id)
         .order_by(Document.created_at.asc())
         .all()
     )
-    matches: list[Document] = []
-    for document in documents:
-        metadata = document.meta or {}
-        candidates = {
-            Path(str(metadata.get("filename") or "")).name.casefold(),
-            Path(str(metadata.get("display_title") or "")).name.casefold(),
-            Path(str(metadata.get("source_file") or "")).name.casefold(),
-        }
-        if expected in candidates:
-            matches.append(document)
-    return matches
+    sources: dict[str, list[str]] = {}
+    for document_id, source_id, metadata in documents:
+        metadata = metadata or {}
+        ids = [str(document_id), str(source_id)]
+        for key in ("filename", "display_title", "source_file"):
+            name = Path(str(metadata.get(key) or "")).name.casefold()
+            if name:
+                sources.setdefault(name, []).extend(ids)
+    return {name: list(dict.fromkeys(ids)) for name, ids in sources.items()}
+
+
+def _case_source_files(item: dict[str, Any]) -> list[str]:
+    files = [item.get("source_file"), *(item.get("source_files") or [])]
+    return list(dict.fromkeys(str(value).strip() for value in files if value and str(value).strip()))
 
 
 def _suite_applies_to_repo(payload: dict[str, Any], repo: Repository) -> bool:
@@ -64,18 +66,17 @@ def _suite_applies_to_repo(payload: dict[str, Any], repo: Repository) -> bool:
 
 
 def _suite_metadata(
-    db: Session,
-    repo: Repository,
     path: Path,
     payload: dict[str, Any],
     sha256: str,
+    source_ids: dict[str, list[str]],
 ) -> dict[str, Any]:
-    missing_sources: list[str] = []
-    for item in payload["cases"]:
-        source_file = str(item.get("source_file") or "").strip()
-        if source_file and not _matching_documents(db, repo.id, source_file):
-            missing_sources.append(source_file)
-    missing_sources = list(dict.fromkeys(missing_sources))
+    missing_sources = list(dict.fromkeys(
+        name
+        for item in payload["cases"]
+        for name in _case_source_files(item)
+        if Path(name).name.casefold() not in source_ids
+    ))
     return {
         "id": str(payload["name"]),
         "name": str(payload["name"]),
@@ -103,10 +104,11 @@ def list_eval_suites(
         raise ValueError(f"Repository {repo_id} was not found")
     suites: list[dict[str, Any]] = []
     if suite_dir.is_dir():
+        source_ids = _indexed_source_ids(db, repo.id)
         for path in sorted(suite_dir.glob("*.json")):
             payload, sha256 = _read_suite(path)
             if _suite_applies_to_repo(payload, repo):
-                suites.append(_suite_metadata(db, repo, path, payload, sha256))
+                suites.append(_suite_metadata(path, payload, sha256, source_ids))
     suites.sort(key=lambda item: (not item["recommended"], not item["ready"], item["label"]))
     suites.append(
         {
@@ -155,7 +157,8 @@ def load_eval_suite(
         payload, sha256 = _read_suite(path)
         if str(payload["name"]) != suite_id or not _suite_applies_to_repo(payload, repo):
             continue
-        metadata = _suite_metadata(db, repo, path, payload, sha256)
+        source_ids = _indexed_source_ids(db, repo.id)
+        metadata = _suite_metadata(path, payload, sha256, source_ids)
         if not metadata["ready"]:
             missing = "、".join(metadata["missing_sources"])
             raise ValueError(f"评测集 {suite_id} 缺少已索引来源：{missing}")
@@ -167,15 +170,11 @@ def load_eval_suite(
             if not question or not reference:
                 raise ValueError(f"评测集 {suite_id} 的 {case_id} 缺少 question 或 reference")
             source_file = str(item.get("source_file") or "").strip()
-            documents = _matching_documents(db, repo.id, source_file) if source_file else []
-            expected_source_ids = list(
-                dict.fromkeys(
-                    str(value)
-                    for document in documents
-                    for value in (document.id, document.source_id)
-                    if value
-                )
-            )
+            source_groups = {
+                name: source_ids[Path(name).name.casefold()]
+                for name in _case_source_files(item)
+            }
+            expected_source_ids = list(dict.fromkeys(value for ids in source_groups.values() for value in ids))
             cases.append(
                 RagEvalCase(
                     id=case_id,
@@ -190,6 +189,8 @@ def load_eval_suite(
                     must_not_include=[str(value) for value in item.get("must_not_include") or []],
                     answer_regex=str(item.get("answer_regex") or "").strip() or None,
                     source_file=source_file or None,
+                    expected_source_groups=source_groups,
+                    conflict_values=[str(value) for value in item.get("conflict_values") or []],
                 )
             )
         metadata["case_count"] = len(cases)

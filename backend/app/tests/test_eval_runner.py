@@ -1,6 +1,7 @@
 import re
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi import BackgroundTasks
@@ -18,10 +19,12 @@ from app.services.evals.ragas_runner import (
     RagEvalCase,
     _default_cases,
     _hard_rules,
+    _retrieval_metrics,
     _evaluation_project_context,
     _ensure_ragas_compatibility,
     _split_faithfulness_response,
     rescore_rag_result,
+    retryable_ragas_metrics,
     run_rag_quality_eval,
 )
 from app.services.evals.suites import list_eval_suites, load_eval_suite
@@ -150,6 +153,68 @@ def test_hard_rules_enforce_required_forbidden_and_output_format() -> None:
     assert hard["missing_phrases"] == ["当前 Git checkout"]
     assert hard["forbidden_phrases"] == ["GitHub 仓库"]
     assert hard["answer_pattern_matched"] is False
+
+
+def test_chapter_suite_resolves_all_five_sources_in_the_selected_repo() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    docs_dir = Path(__file__).resolve().parents[3] / "docs" / "examples" / "rag_chapter_07"
+    docs = sorted(docs_dir.glob("*.md"))
+    assert len(docs) == 5
+    with sessionmaker(bind=engine)() as db:
+        repo = Repository(owner="local", name="course", full_name="local/course")
+        other = Repository(owner="local", name="other", full_name="local/other")
+        db.add_all([repo, other])
+        db.flush()
+        for path in docs:
+            db.add(Document(
+                repo_id=other.id if path == docs[-1] else repo.id,
+                source_type="knowledge_file",
+                source_id=uuid4(),
+                title=path.name,
+                content=path.read_text(encoding="utf-8"),
+                meta={"filename": path.name},
+            ))
+        db.flush()
+        suite_id = "chapter-07-quality-gate"
+        listed = next(suite for suite in list_eval_suites(db, repo.id) if suite["id"] == suite_id)
+        assert listed["missing_sources"] == [docs[-1].name]
+        with pytest.raises(ValueError, match="缺少已索引来源"):
+            load_eval_suite(db, repo.id, suite_id)
+
+        doc = db.query(Document).filter_by(repo_id=other.id).one()
+        doc.repo_id = repo.id
+        db.flush()
+        loaded = load_eval_suite(db, repo.id, suite_id)
+        cases = {case.id: case for case in loaded.cases}
+        assert len(cases) == 9
+        assert set(cases["cross-document-login-release"].expected_source_groups) == {docs[0].name, docs[1].name}
+        assert cases["unknown-revenue-target"].kind == "no_answer"
+        assert cases["conflicting-rollback-threshold"].conflict_values == ["2%", "5%"]
+
+
+def test_conflict_gate_requires_every_document_and_the_exact_thresholds() -> None:
+    case = RagEvalCase(
+        question="阈值是否冲突？",
+        reference="现行 2%，废弃 5%。",
+        expected_source_ids=["current", "obsolete"],
+        expected_source_groups={"current.md": ["current"], "obsolete.md": ["obsolete"]},
+        conflict_values=["2%", "5%"],
+        kind="conflict",
+    )
+    duplicate = [{"id": "chunk-1", "source_id": "current"}, {"id": "chunk-2", "source_id": "current"}]
+    sources = [*duplicate, {"id": "chunk-3", "source_id": "obsolete"}]
+    answer = {"answer": "现行为 ２％，废弃值为 5 %。"}
+    hard = _hard_rules(case, answer, duplicate, ["evidence"])
+    assert hard["passed"] is False
+    assert hard["missing_sources"] == ["obsolete.md"]
+    assert _hard_rules(case, answer, sources, ["evidence"])["passed"] is True
+    wrong_value = _hard_rules(case, {"answer": "现行 12%，废弃 0.5%。"}, sources, ["evidence"])
+    assert wrong_value["missing_conflict_values"] == ["2%", "5%"]
+    assert _retrieval_metrics([case], [{"results": duplicate}], 2)["recall_at_k"] == 0.5
+    assert _retrieval_metrics([case], [{"results": sources}], 3)["ndcg"] < 1.0
+    legacy = RagEvalCase(question="规则？", reference="规则", expected_source_ids=["current"])
+    assert _retrieval_metrics([legacy], [{"results": duplicate}], 2)["ndcg"] == 1.0
 
 
 def test_eval_project_context_matches_frontend_team_and_memory_shape() -> None:
@@ -431,6 +496,50 @@ async def test_rag_quality_eval_runs_real_chatagent_and_rolls_back_eval_conversa
         "finalizing",
     ]
     assert db.query(Conversation).filter(Conversation.status == "evaluation").count() == 0
+
+
+@pytest.mark.asyncio
+async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(monkeypatch) -> None:
+    from app.services.evals import ragas_runner
+
+    async def run_case(db, repo, case, **kwargs):
+        if case.kind == "no_answer":
+            return {"answer": "知识库缺少相关资料，无法确定。"}
+        return {
+            "answer": "答案。",
+            "evaluation_trace": {"retrievals": [{"contexts": ["证据"], "sources": [{"source_id": "source"}]}]},
+        }
+
+    monkeypatch.setattr(ragas_runner, "_run_chatagent_case", run_case)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with sessionmaker(bind=engine)() as db:
+        repo = Repository(owner="local", name="course", full_name="local/course")
+        db.add(repo)
+        db.flush()
+        no_answer = RagEvalCase(
+            id="missing",
+            question="营收目标？",
+            reference="无法确定。",
+            expected_source_ids=[],
+            kind="no_answer",
+            must_not_include=["亿元"],
+        )
+        positive = RagEvalCase(id="positive", question="规则？", reference="答案。", expected_source_ids=["source"])
+        scorer = RecordingScorer()
+        result = await run_rag_quality_eval(db, str(repo.id), cases=[no_answer, positive], scorer=scorer, run_judge=True)
+
+    assert result["status"] == "passed"
+    assert result["hard_gate"]["passed_cases"] == 2
+    refusal, answer = result["cases"]
+    assert refusal["hard_rules"]["contexts_present"] is False
+    assert refusal["hard_rules"]["refusal_matched"] is True
+    assert refusal["ragas"] is None
+    assert retryable_ragas_metrics(refusal) == set()
+    assert result["ragas"]["metrics"]["faithfulness"]["scored_cases"] == 1
+    assert len(scorer.calls) == 1
+    assert answer["ragas"]["faithfulness"] == 0.97
+    assert not _hard_rules(no_answer, {"answer": "预计 5 亿元。"}, [], [])["passed"]
 
 
 @pytest.mark.asyncio

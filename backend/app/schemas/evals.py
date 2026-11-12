@@ -9,12 +9,14 @@ class RagEvalCaseRequest(BaseModel):
     question: str
     reference: str
     expected_source_ids: list[str] = Field(default_factory=list)
+    expected_source_groups: dict[str, list[str]] = Field(default_factory=dict)
     source_type: str | None = None
     required_tools: list[str] = Field(default_factory=list)
     expected_tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     kind: str = "positive"
     must_include: list[str] = Field(default_factory=list)
     must_not_include: list[str] = Field(default_factory=list)
+    conflict_values: list[str] = Field(default_factory=list)
     answer_regex: str | None = None
     source_file: str | None = None
 

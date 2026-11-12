@@ -7,6 +7,7 @@ import re
 import sys
 import time
 import types
+import unicodedata
 import uuid
 import warnings
 from collections.abc import Awaitable, Callable
@@ -34,6 +35,12 @@ AGENT_RAGAS_METRICS = (
     "agent_goal_accuracy",
     "tool_call_accuracy",
     "tool_call_f1",
+)
+NO_ANSWER_SKIP_REASON = "no_answer_uses_hard_rules"
+_REFUSAL_PATTERN = re.compile(
+    r"无法(?:确定|确认|回答|得知|判断|提供)|(?:没有|未找到|未检索到).{0,25}(?:资料|证据|信息)"
+    r"|(?:资料|证据|信息)不足|(?:cannot|can't|unable to) (?:answer|determine|confirm)|not enough (?:evidence|information)",
+    re.IGNORECASE,
 )
 
 _FAITHFULNESS_CHUNK_CHARS = 700
@@ -91,6 +98,8 @@ class RagEvalCase:
     answer_regex: str | None = None
     source_file: str | None = None
     id: str = ""
+    expected_source_groups: dict[str, list[str]] = field(default_factory=dict)
+    conflict_values: list[str] = field(default_factory=list)
 
 
 class SemanticScorer(Protocol):
@@ -494,22 +503,37 @@ def _dcg(hits: list[int]) -> float:
 
 
 def _retrieval_metrics(cases: list[RagEvalCase], rows: list[dict[str, Any]], k: int) -> dict[str, float]:
-    if not cases:
-        return {"recall_at_k": 0.0, "precision_at_k": 0.0, "mrr": 0.0, "ndcg": 0.0}
     recall_values: list[float] = []
     precision_values: list[float] = []
     reciprocal_ranks: list[float] = []
     ndcg_values: list[float] = []
     for case, row in zip(cases, rows, strict=True):
+        if case.kind == "no_answer":
+            continue
         expected = set(case.expected_source_ids)
         results = row["results"][:k]
-        hits = [1 if _source_hit(result, expected) else 0 for result in results]
-        recall_values.append(1.0 if not expected or any(hits) else 0.0)
+        if case.expected_source_groups:
+            groups = {name: set(ids) for name, ids in case.expected_source_groups.items()}
+            matched: set[str] = set()
+            hits = []
+            for result in results:
+                name = next((name for name, ids in groups.items() if _source_hit(result, ids)), None)
+                hits.append(int(name is not None and name not in matched))
+                if name is not None:
+                    matched.add(name)
+            recall_values.append(len(matched) / len(groups))
+            ideal = [1] * min(len(groups), k)
+        else:
+            hits = [int(_source_hit(result, expected)) for result in results]
+            recall_values.append(float(not expected or any(hits)))
+            ideal = sorted(hits, reverse=True)
         precision_values.append(sum(hits) / max(len(results), 1))
         first_hit = next((index + 1 for index, hit in enumerate(hits) if hit), None)
-        reciprocal_ranks.append(1.0 / first_hit if first_hit else (1.0 if not expected else 0.0))
-        ideal = [1] + [0] * max(len(hits) - 1, 0)
-        ndcg_values.append(_dcg(hits) / (_dcg(ideal) or 1.0) if expected else 1.0)
+        has_expected_sources = bool(expected or case.expected_source_groups)
+        reciprocal_ranks.append(1.0 / first_hit if first_hit else float(not has_expected_sources))
+        ndcg_values.append(_dcg(hits) / (_dcg(ideal) or 1.0) if has_expected_sources else 1.0)
+    if not recall_values:
+        return {"recall_at_k": 0.0, "precision_at_k": 0.0, "mrr": 0.0, "ndcg": 0.0}
     return {
         "recall_at_k": round(sum(recall_values) / len(recall_values), 4),
         "precision_at_k": round(sum(precision_values) / len(precision_values), 4),
@@ -546,9 +570,24 @@ def _trace_rows(trace: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]
     return contexts, sources
 
 
+def _normalize_fact(text: str) -> str:
+    return "".join(unicodedata.normalize("NFKC", text).casefold().split())
+
+
+def _contains_fact(normalized_answer: str, value: str) -> bool:
+    fact = _normalize_fact(value)
+    if not fact:
+        return False
+    prefix = r"(?<!\d)(?<!\d\.)" if fact[0].isdigit() else ""
+    suffix = r"(?!\d|\.\d)" if fact[-1].isdigit() else ""
+    return re.search(prefix + re.escape(fact) + suffix, normalized_answer) is not None
+
+
 def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[str, Any]], contexts: list[str]) -> dict[str, Any]:
+    groups = {name: set(ids) for name, ids in case.expected_source_groups.items()}
+    missing_sources = [name for name, ids in groups.items() if not any(_source_hit(item, ids) for item in sources)]
     expected = set(case.expected_source_ids)
-    source_hit = not expected or any(_source_hit(item, expected) for item in sources)
+    source_hit = not missing_sources if groups else not expected or any(_source_hit(item, expected) for item in sources)
     actual_tools = [
         str(item.get("tool_name") or "")
         for item in result.get("tool_calls") or []
@@ -566,28 +605,38 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
     answer = str(result.get("answer") or "").strip()
     answer_present = bool(answer)
     contexts_present = bool(contexts)
-    missing_phrases = [value for value in case.must_include if value.casefold() not in answer.casefold()]
-    forbidden_phrases = [value for value in case.must_not_include if value.casefold() in answer.casefold()]
+    contexts_required = case.kind != "no_answer"
+    refusal_matched = None if contexts_required else bool(_REFUSAL_PATTERN.search(answer))
+    normalized_answer = _normalize_fact(answer)
+    missing_phrases = [value for value in case.must_include if not _contains_fact(normalized_answer, value)]
+    forbidden_phrases = [value for value in case.must_not_include if _contains_fact(normalized_answer, value)]
+    missing_conflict_values = [value for value in case.conflict_values if not _contains_fact(normalized_answer, value)]
     answer_pattern_matched = case.answer_regex is None or re.fullmatch(case.answer_regex, answer) is not None
     passed = (
         source_hit
         and not missing_tools
         and not tool_errors
         and answer_present
-        and contexts_present
+        and (contexts_present or not contexts_required)
+        and refusal_matched is not False
         and not missing_phrases
         and not forbidden_phrases
+        and not missing_conflict_values
         and answer_pattern_matched
     )
     return {
         "passed": passed,
         "source_hit": source_hit,
+        "missing_sources": missing_sources,
         "answer_present": answer_present,
         "contexts_present": contexts_present,
+        "contexts_required": contexts_required,
+        "refusal_matched": refusal_matched,
         "missing_tools": missing_tools,
         "tool_errors": tool_errors,
         "missing_phrases": missing_phrases,
         "forbidden_phrases": forbidden_phrases,
+        "missing_conflict_values": missing_conflict_values,
         "answer_pattern_matched": answer_pattern_matched,
         "citation_count": len(result.get("citations") or []),
     }
@@ -721,28 +770,43 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "action": "重试异常指标；若仍失败，再检查超时、模型结构化输出和答案长度。",
             }
         )
-    if not hard.get("source_hit", True) or not hard.get("contexts_present", True):
+    if not hard.get("source_hit", True) or (
+        hard.get("contexts_required", True) and not hard.get("contexts_present", True)
+    ):
         diagnoses.append(
             {
                 "category": "retrieval",
                 "severity": "failed",
                 "title": "目标证据没有进入回答上下文",
-                "summary": "预期来源未命中，或生产检索链没有返回可评分上下文。",
+                "summary": "、".join(hard.get("missing_sources") or []) or "预期来源未命中，或生产检索链没有返回可评分上下文。",
                 "action": "检查切片、Query 改写、来源过滤、Top-K 和 Rerank。",
             }
         )
     rule_failures = (
         list(hard.get("missing_phrases") or [])
         + list(hard.get("forbidden_phrases") or [])
+        + list(hard.get("missing_conflict_values") or [])
     )
-    if rule_failures or hard.get("answer_pattern_matched") is False:
+    refusal_missing = hard.get("refusal_matched") is False
+    if rule_failures or hard.get("answer_pattern_matched") is False or refusal_missing:
+        summary = "回答没有明确说明证据不足。" if refusal_missing else "回答遗漏关键事实、包含禁用事实，或没有遵守要求的输出格式。"
         diagnoses.append(
             {
                 "category": "generation",
                 "severity": "failed",
                 "title": "回答违反确定性验收规则",
-                "summary": "回答遗漏关键事实、包含禁用事实，或没有遵守要求的输出格式。",
+                "summary": summary,
                 "action": "收紧回答指令，并审查 must_include、must_not_include 与格式规则。",
+            }
+        )
+    if hard.get("missing_tools") or hard.get("tool_errors"):
+        diagnoses.append(
+            {
+                "category": "tool_execution",
+                "severity": "failed",
+                "title": "工具调用未通过硬规则",
+                "summary": "缺少必需工具，或至少一次工具调用失败。",
+                "action": "查看逐题工具轨迹，检查失败原因和调用是否必要。",
             }
         )
 
@@ -852,13 +916,15 @@ def _finalize_result(
     evaluation_set: dict[str, Any] | None,
     rescore_of: str | None = None,
 ) -> dict[str, Any]:
-    metric_rows = _metric_details(rows)
+    judge_rows = [row for row in rows if row.get("ragas_skipped_reason") != NO_ANSWER_SKIP_REASON]
+    metric_rows = _metric_details(judge_rows)
     hard_passed_cases = sum(1 for row in rows if (row.get("hard_rules") or {}).get("passed"))
     hard_pass_rate = round(hard_passed_cases / len(rows), 4) if rows else 0.0
-    case_metric_errors = sum(bool(row.get("ragas_errors")) for row in rows)
-    required_scored = all(metric_rows[name]["score"] is not None for name in REQUIRED_RAGAS_METRICS)
-    ragas_available = bool(judge_requested and scorer is not None and required_scored)
-    evaluation_complete = bool(ragas_available and case_metric_errors == 0)
+    case_metric_errors = sum(bool(row.get("ragas_errors")) for row in judge_rows)
+    judge_required = judge_requested and bool(judge_rows)
+    ragas_available = judge_required and scorer is not None
+    required_scored = all(metric_rows[name]["scored_cases"] == len(judge_rows) for name in REQUIRED_RAGAS_METRICS)
+    evaluation_complete = ragas_available and required_scored and case_metric_errors == 0
     gated_names = list(REQUIRED_RAGAS_METRICS)
     gated_names.extend(
         name
@@ -873,8 +939,8 @@ def _finalize_result(
         status = "no_cases"
     elif not hard_passed or semantic_failed:
         quality_status = "failed"
-        status = "error" if judge_requested and not evaluation_complete else "failed"
-    elif not judge_requested:
+        status = "error" if judge_required and not evaluation_complete else "failed"
+    elif not judge_required:
         quality_status = "partial"
         status = "partial"
     elif not evaluation_complete:
@@ -979,7 +1045,7 @@ async def run_rag_quality_eval(
         total_cases=total_cases,
     )
     judge_error: str | None = None
-    if judge_requested and scorer is None:
+    if judge_requested and scorer is None and any(case.kind != "no_answer" for case in evaluation_cases):
         try:
             scorer = RagasCollectionsScorer()
         except RagasUnavailableError as exc:
@@ -1012,7 +1078,9 @@ async def run_rag_quality_eval(
         semantic_scores: dict[str, float] | None = None
         semantic_errors: dict[str, str] = {}
         skipped_reason: str | None = None
-        if not judge_requested:
+        if case.kind == "no_answer":
+            skipped_reason = NO_ANSWER_SKIP_REASON
+        elif not judge_requested:
             skipped_reason = "judge_disabled"
         elif scorer is None:
             skipped_reason = "judge_unavailable"
@@ -1050,10 +1118,12 @@ async def run_rag_quality_eval(
                 "question": case.question,
                 "reference": case.reference,
                 "expected_source_ids": case.expected_source_ids,
+                "expected_source_files": list(case.expected_source_groups),
                 "source_file": case.source_file,
                 "kind": case.kind,
                 "must_include": case.must_include,
                 "must_not_include": case.must_not_include,
+                "conflict_values": case.conflict_values,
                 "answer_regex": case.answer_regex,
                 "required_tools": case.required_tools,
                 "expected_tool_calls": case.expected_tool_calls,
@@ -1111,6 +1181,17 @@ async def run_rag_quality_eval(
     )
 
 
+def retryable_ragas_metrics(row: dict[str, Any]) -> set[str]:
+    if row.get("ragas_skipped_reason") == NO_ANSWER_SKIP_REASON:
+        return set()
+    scores = row.get("ragas") or {}
+    errors = row.get("ragas_errors") or {}
+    expected = set(REQUIRED_RAGAS_METRICS)
+    if row.get("expected_tool_calls"):
+        expected.update(("tool_call_accuracy", "tool_call_f1"))
+    return (expected - scores.keys()) | (errors.keys() & {*CORE_RAGAS_METRICS, *AGENT_RAGAS_METRICS})
+
+
 async def rescore_rag_result(
     result: dict[str, Any],
     *,
@@ -1123,18 +1204,7 @@ async def rescore_rag_result(
     rows = copy.deepcopy(result.get("cases") or [])
     if not rows:
         raise ValueError("原评测没有可用于重评分的逐题现场")
-    retry_by_case: list[set[str]] = []
-    for row in rows:
-        scores = row.get("ragas") or {}
-        errors = row.get("ragas_errors") or {}
-        retry_names = {name for name in errors if name in (*CORE_RAGAS_METRICS, *AGENT_RAGAS_METRICS)}
-        retry_names.update(name for name in REQUIRED_RAGAS_METRICS if name not in scores)
-        expected_calls = row.get("expected_tool_calls") or []
-        if expected_calls:
-            retry_names.update(
-                name for name in ("tool_call_accuracy", "tool_call_f1") if name not in scores
-            )
-        retry_by_case.append(retry_names)
+    retry_by_case = [retryable_ragas_metrics(row) for row in rows]
     retry_count = sum(bool(names) for names in retry_by_case)
     if retry_count == 0:
         raise ValueError("原评测没有失败或缺失的 Judge 指标")

@@ -9,7 +9,7 @@ const navItems = [
   { href: "/workflow-runs", label: "Runs" },
   { href: "/workspaces", label: "Reports" },
   { href: "/code-graph", label: "Code Graph" },
-  { href: "/evals", label: "Evals" }
+  { href: "/evals", label: "RAG 评测" }
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

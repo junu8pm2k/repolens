@@ -54,12 +54,16 @@ type ToolCall = {
 type HardRules = {
   passed: boolean;
   source_hit: boolean;
+  missing_sources?: string[];
   answer_present: boolean;
   contexts_present: boolean;
+  contexts_required?: boolean;
+  refusal_matched?: boolean | null;
   missing_tools: string[];
   tool_errors: unknown[];
   missing_phrases: string[];
   forbidden_phrases: string[];
+  missing_conflict_values?: string[];
   answer_pattern_matched: boolean;
 };
 
@@ -70,6 +74,7 @@ type RagCaseResult = {
   response?: string;
   route?: string;
   source_file?: string | null;
+  expected_source_files?: string[];
   latency_ms: number;
   retrieved_contexts: string[];
   retrieved_sources: RetrievedSource[];
@@ -175,6 +180,7 @@ type EvalComparison = {
 type IssueDraftResponse = { draft_id: string; status: string; title: string };
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
+const NO_ANSWER_SKIP_REASON = "no_answer_uses_hard_rules";
 
 const METRICS = [
   { key: "context_precision", label: "Context Precision", description: "有用证据是否排在前面，前排是否混入噪声" },
@@ -197,6 +203,7 @@ const METRIC_LABELS: Record<string, string> = {
 
 const DIAGNOSIS_LABELS: Record<string, string> = {
   judge_error: "Judge 异常",
+  tool_execution: "工具调用失败",
   retrieval: "目标证据未命中",
   retrieval_noise: "检索噪声",
   retrieval_recall: "召回不完整",
@@ -313,7 +320,10 @@ export default function EvalsPage() {
     return METRICS.map((item) => ({ ...item, detail: details[item.key] }));
   }, [result]);
   const rescoreAvailable = Boolean(
-    result && !active && cases.some((item) => Object.keys(item.ragas_errors || {}).length > 0 || !item.ragas)
+    result && !active && cases.some((item) =>
+      item.ragas_skipped_reason !== NO_ANSWER_SKIP_REASON &&
+      (Object.keys(item.ragas_errors || {}).length > 0 || METRICS.some(({ key }) => item.ragas?.[key] == null))
+    )
   );
 
   const baselineOptions = useMemo(() => {
@@ -408,7 +418,7 @@ export default function EvalsPage() {
   return (
     <>
       <PageTitle
-        title="ChatAgent RAGAS 质量工作台"
+        title="RAG 评测"
         description="使用固定评测集运行真实 ChatAgent，定位检索、生成和 Judge 问题，并完成重评分与回归对比。"
       />
 
@@ -430,7 +440,7 @@ export default function EvalsPage() {
             <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" value={suiteId} onChange={(event) => setSuiteId(event.target.value)}>
               <option value="">请选择评测集</option>
               {suites.map((suite) => (
-                <option key={suite.id} value={suite.id} disabled={!suite.ready}>
+                <option key={suite.id} value={suite.id}>
                   {suite.label}{suite.recommended ? "（推荐）" : ""}{suite.ready ? "" : "（来源未就绪）"}
                 </option>
               ))}
@@ -445,14 +455,20 @@ export default function EvalsPage() {
                 {selectedSuite.case_count ? `${selectedSuite.case_count} 条 Case` : "运行时自动生成"}
                 {selectedSuite.sha256 ? ` · Hash ${selectedSuite.sha256.slice(0, 12)}` : ""}
               </div>
-              {!selectedSuite.ready && <p className="mt-2 text-rose-700">缺少来源：{selectedSuite.missing_sources.join("、")}</p>}
+              {!selectedSuite.ready && (
+                <p className="mt-2 text-rose-700">
+                  缺少来源：{selectedSuite.missing_sources.join("、")}。请先在{" "}
+                  <Link href={`/knowledge/${repoId}`} className="font-semibold underline">项目知识</Link>{" "}
+                  上传并完成索引。
+                </p>
+              )}
             </div>
           )}
 
           <label className="mt-4 block text-sm font-medium text-slate-700">
             Top-K
             <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2" value={topK} onChange={(event) => setTopK(Number(event.target.value))}>
-              {[3, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
+              {[2, 3, 4, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
 
@@ -464,7 +480,7 @@ export default function EvalsPage() {
 
           <PrimaryButton onClick={runEval} disabled={loading || !repoId || !suiteId || selectedSuite?.ready === false} className="mt-6 w-full gap-2">
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {loading ? "后台任务运行中…" : "运行固定 RAGAS 评测"}
+            {loading ? "后台任务运行中…" : "运行评测"}
           </PrimaryButton>
         </div>
 
@@ -531,7 +547,7 @@ export default function EvalsPage() {
 
               <DiagnosticOverview result={result.result} />
             </>
-          ) : <div className="flex min-h-72 items-center justify-center text-sm text-slate-500">等待运行固定 RAGAS 评测</div>}
+          ) : <div className="flex min-h-72 items-center justify-center text-sm text-slate-500">等待运行评测</div>}
         </div>
       </section>
 
@@ -654,9 +670,13 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-ink">{item.id}</span>{passed ? <PassLabel /> : <FailLabel />}{item.ragas_errors && Object.keys(item.ragas_errors).length > 0 && <span className="rounded-full bg-violet-50 px-2 py-1 text-[11px] text-violet-700">Judge 异常</span>}</div>
                   <p className="mt-2 text-sm leading-6 text-slate-700">{item.question}</p>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {METRICS.map((metric) => <ScoreChip key={metric.key} label={metric.label} value={item.ragas?.[metric.key]} />)}
-                  </div>
+                  {item.ragas_skipped_reason === NO_ANSWER_SKIP_REASON ? (
+                    <p className="mt-2 text-xs text-slate-500">拒答用例，仅检查硬规则</p>
+                  ) : (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {METRICS.map((metric) => <ScoreChip key={metric.key} label={metric.label} value={item.ragas?.[metric.key]} />)}
+                    </div>
+                  )}
                 </div>
                 <ChevronDown className="mt-1 h-5 w-5 shrink-0 text-slate-400 transition group-open:rotate-180" />
               </summary>
@@ -683,7 +703,7 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
                   </div>
                 )}
 
-                <HardRulePanel hard={item.hard_rules} />
+                <HardRulePanel hard={item.hard_rules} expectedSources={item.expected_source_files} />
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-2">
                   <div className="rounded-md border border-line p-3">
@@ -728,22 +748,28 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
   );
 }
 
-function HardRulePanel({ hard }: { hard: HardRules }) {
+function HardRulePanel({ hard, expectedSources }: { hard: HardRules; expectedSources?: string[] }) {
   const rows = [
-    ["预期来源命中", hard.source_hit],
-    ["取得检索上下文", hard.contexts_present],
     ["生成有效答案", hard.answer_present],
     ["输出格式符合要求", hard.answer_pattern_matched !== false],
     ["工具无错误", !(hard.tool_errors || []).length]
-  ] as const;
+  ] satisfies [string, boolean][];
+  if (hard.contexts_required === false) {
+    rows.unshift(["明确说明证据不足", hard.refusal_matched === true]);
+  } else {
+    rows.unshift(["预期来源全部命中", hard.source_hit], ["取得检索上下文", hard.contexts_present]);
+  }
   return (
     <div className="mt-4 rounded-md border border-line p-3">
       <div className="text-xs font-semibold text-slate-700">确定性硬规则</div>
       <div className="mt-2 flex flex-wrap gap-2">
         {rows.map(([label, ok]) => <span key={label} className={`rounded-full px-2.5 py-1 text-[11px] ${ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{ok ? "✓" : "×"} {label}</span>)}
       </div>
+      {expectedSources && expectedSources.length > 0 && <p className="mt-2 text-xs text-slate-500">预期来源：{expectedSources.join("、")}</p>}
+      {hard.missing_sources && hard.missing_sources.length > 0 && <p className="mt-1 text-xs text-rose-700">缺少来源：{hard.missing_sources.join("、")}</p>}
       {!!hard.missing_phrases?.length && <p className="mt-2 text-xs text-rose-700">缺少关键事实：{hard.missing_phrases.join("、")}</p>}
       {!!hard.forbidden_phrases?.length && <p className="mt-1 text-xs text-rose-700">包含禁用事实：{hard.forbidden_phrases.join("、")}</p>}
+      {!!hard.missing_conflict_values?.length && <p className="mt-1 text-xs text-rose-700">缺少冲突值：{hard.missing_conflict_values.join("、")}</p>}
       {!!hard.missing_tools?.length && <p className="mt-1 text-xs text-rose-700">缺少工具：{hard.missing_tools.join("、")}</p>}
     </div>
   );

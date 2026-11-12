@@ -15,6 +15,7 @@ from app.services.evals.ragas_runner import (
     REQUIRED_RAGAS_METRICS,
     RagEvalCase,
     rescore_rag_result,
+    retryable_ragas_metrics,
     run_rag_quality_eval,
 )
 from app.services.evals.suites import AUTO_SMOKE_SUITE_ID, list_eval_suites, load_eval_suite
@@ -31,19 +32,27 @@ def _request_case(item) -> RagEvalCase:
         question=item.question,
         reference=item.reference,
         expected_source_ids=item.expected_source_ids,
+        expected_source_groups=item.expected_source_groups,
         source_type=item.source_type,
         required_tools=item.required_tools,
         expected_tool_calls=item.expected_tool_calls,
         kind=item.kind,
         must_include=item.must_include,
         must_not_include=item.must_not_include,
+        conflict_values=item.conflict_values,
         answer_regex=item.answer_regex,
         source_file=item.source_file,
     )
 
 
 def _custom_evaluation_set(payload: EvalRunRequest) -> dict:
-    serialized = [item.model_dump(mode="json") for item in payload.cases or []]
+    serialized = [
+        item.model_dump(
+            mode="json",
+            exclude={key for key in ("expected_source_groups", "conflict_values") if not getattr(item, key)},
+        )
+        for item in payload.cases or []
+    ]
     canonical = json.dumps(serialized, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return {
         "id": payload.name or "custom-cases",
@@ -264,12 +273,7 @@ async def rescore_eval(
     source_result = source.result_json or {}
     if not source_result.get("cases"):
         raise HTTPException(status_code=400, detail="原评测没有可用于重评分的逐题现场")
-    error_count = sum(bool(item.get("ragas_errors")) for item in source_result.get("cases") or [])
-    missing_count = sum(
-        any(name not in (item.get("ragas") or {}) for name in ("context_precision", "context_recall", "faithfulness", "answer_relevancy", "agent_goal_accuracy"))
-        for item in source_result.get("cases") or []
-    )
-    if error_count == 0 and missing_count == 0:
+    if not any(retryable_ragas_metrics(item) for item in source_result["cases"]):
         raise HTTPException(status_code=400, detail="原评测没有失败或缺失的 Judge 指标")
     repo_id = str((source_result.get("target") or {}).get("repo_id") or "")
     evaluation_set = dict(source_result.get("evaluation_set") or {})

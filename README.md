@@ -110,9 +110,13 @@ POST /api/rag/{repo_id}/reindex
 
 ## ChatAgent RAGAS 评测
 
-启动主应用后打开 `http://127.0.0.1:3000/evals`，选择仓库、固定评测集和 Top-K，再点击“运行固定 RAGAS 评测”。评测会在隔离会话中真实运行生产 ChatAgent 和工具集，收集预检索与 Agent 二次检索证据，然后使用 Ragas 0.4 Collections API 计算 Context Precision、Context Recall、Faithfulness、Answer Relevancy 和 Agent Goal Accuracy。结果会保存评测集 Hash、阈值、逐题工具轨迹、检索证据、硬规则与失败诊断，便于对同一基线做回归。
+启动主应用后，从导航栏打开「RAG 评测」或访问 `http://127.0.0.1:3000/evals`。选择仓库、固定评测集和 Top-K，再点击「运行评测」。评测会在隔离会话中真实运行生产 ChatAgent 和工具集，收集预检索与 Agent 二次检索证据，然后使用 Ragas 0.4 Collections API 计算 Context Precision、Context Recall、Faithfulness、Answer Relevancy 和 Agent Goal Accuracy。结果会保存评测集 Hash、阈值、逐题工具轨迹、检索证据、硬规则与失败诊断，便于对同一基线做回归。
 
-默认 Judge 复用 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`；也可以通过 `.env` 中的 `RAGAS_JUDGE_API_KEY`、`RAGAS_JUDGE_BASE_URL`、`RAGAS_JUDGE_MODEL` 单独配置。主项目内置的正式基准位于 `docs/datas/evals/rag_cases.json`，启动时会检查用例引用的文档是否已进入当前仓库知识库：
+默认 Judge 复用 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`。可通过 `.env` 中的 `RAGAS_JUDGE_API_KEY`、`RAGAS_JUDGE_BASE_URL`、`RAGAS_JUDGE_MODEL` 单独配置。固定评测集位于 `docs/datas/evals/`，运行前会检查预期文档是否已在所选仓库完成索引。
+
+要运行「知识库问答」评测集，先在「项目知识」上传 `docs/examples/rag_chapter_07/` 中的五份资料，再从「RAG 评测」页选择同一个仓库和该评测集。它有 9 道固定题。跨文档题要求命中全部预期来源，冲突题检查新旧阈值，拒答题仅计入硬规则。页面支持分别运行 Top-K 2、3、4 并查看各次结果。
+
+通过 API 提交时可使用以下请求。
 
 ```http
 POST /api/evals/rag/run
@@ -121,8 +125,8 @@ Content-Type: application/json
 {
   "repo_id": "<repository-uuid>",
   "run_judge": true,
-  "top_k": 5,
-  "suite_id": "repolens-real-project-rag-baseline"
+  "top_k": 3,
+  "suite_id": "chapter-07-quality-gate"
 }
 ```
 

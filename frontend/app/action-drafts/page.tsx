@@ -5,7 +5,7 @@ import { Check, CheckCircle2, Clock3, FileText, Send, ShieldAlert, X } from "luc
 
 import { apiGet, apiPost } from "@/lib/api";
 import type { Repository } from "@/lib/types";
-import { PageTitle, PrimaryButton } from "@/components/ui/card";
+import { Card, PageTitle, PrimaryButton } from "@/components/ui/card";
 
 type ActionDraft = {
   id: string;
@@ -30,6 +30,9 @@ const statusMeta: Record<string, { label: string; className: string }> = {
   cancelled: { label: "已取消", className: "bg-slate-100 text-slate-600 border-slate-200" },
   failed: { label: "执行失败", className: "bg-rose-50 text-rose-700 border-rose-200" }
 };
+
+const fieldClass =
+  "mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm text-ink outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 
 export default function ActionDraftsPage() {
   const [repos, setRepos] = useState<Repository[]>([]);
@@ -92,86 +95,171 @@ export default function ActionDraftsPage() {
 
   const pendingCount = useMemo(() => drafts.filter((draft) => draft.status === "pending_confirmation").length, [drafts]);
   const executedCount = useMemo(() => drafts.filter((draft) => draft.status === "executed").length, [drafts]);
+  const visibleAudits = audits.slice(0, 10);
 
   return (
     <>
       <PageTitle title="安全草稿与人工确认" description="Agent 的外部写操作先落成可审查草稿；只有具备批准权限的人确认后，系统才执行并写入审计记录。" />
 
-      <section className="grid gap-3 border-y border-line bg-white px-4 py-4 sm:grid-cols-3">
+      <section className="grid gap-3 sm:grid-cols-3">
         <Summary icon={FileText} label="全部草稿" value={drafts.length} />
         <Summary icon={Clock3} label="待确认" value={pendingCount} tone="amber" />
         <Summary icon={CheckCircle2} label="已执行" value={executedCount} tone="green" />
       </section>
 
-      <div className="mt-4 grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <section className="self-start rounded-md border border-line bg-white p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink"><ShieldAlert className="h-4 w-4 text-amber-600" />创建安全草稿</div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+        <Card className="self-start">
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-50 text-amber-600">
+              <ShieldAlert className="h-4 w-4" />
+            </span>
+            <h2 className="text-base font-semibold tracking-tight text-ink">创建安全草稿</h2>
+          </div>
           <p className="mt-2 text-xs leading-5 text-slate-500">这里只保存建议内容，不会直接写入外部系统。</p>
-          <label className="mt-4 block text-sm font-medium text-slate-700">仓库
-            <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none focus:border-teal-500" value={repoId} onChange={(event) => { setRepoId(event.target.value); void load(event.target.value); }}>
+
+          <label className="mt-4 block text-sm font-medium text-slate-700">
+            仓库
+            <select
+              className={fieldClass}
+              value={repoId}
+              onChange={(event) => {
+                setRepoId(event.target.value);
+                void load(event.target.value);
+              }}
+            >
               {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.full_name}</option>)}
             </select>
           </label>
-          <label className="mt-4 block text-sm font-medium text-slate-700">标题
-            <input className="mt-2 w-full rounded-md border border-line px-3 py-2 outline-none focus:border-teal-500" value={title} onChange={(event) => setTitle(event.target.value)} />
+          <label className="mt-4 block text-sm font-medium text-slate-700">
+            标题
+            <input className={fieldClass} value={title} onChange={(event) => setTitle(event.target.value)} />
           </label>
-          <label className="mt-4 block text-sm font-medium text-slate-700">待审查内容
-            <textarea className="mt-2 min-h-40 w-full resize-none rounded-md border border-line px-3 py-2 text-sm leading-6 outline-none focus:border-teal-500" value={content} onChange={(event) => setContent(event.target.value)} placeholder="输入准备发送的报告或评论内容" />
+          <label className="mt-4 block text-sm font-medium text-slate-700">
+            待审查内容
+            <textarea
+              className="mt-2 min-h-40 w-full resize-none rounded-md border border-line bg-white px-3 py-2 text-sm leading-6 text-ink outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              value={content}
+              onChange={(event) => setContent(event.target.value)}
+              placeholder="输入准备发送的报告或评论内容"
+            />
           </label>
-          <PrimaryButton className="mt-4 w-full gap-2" disabled={!repoId || !content.trim() || loading} onClick={createDraft}><FileText className="h-4 w-4" />保存为待确认草稿</PrimaryButton>
-        </section>
+          <PrimaryButton className="mt-4 w-full" disabled={!repoId || !content.trim() || loading} onClick={createDraft}>
+            <FileText className="h-4 w-4" />
+            保存为待确认草稿
+          </PrimaryButton>
+        </Card>
 
         <div className="space-y-4">
           {drafts.map((draft) => {
             const meta = statusMeta[draft.status] || { label: draft.status, className: "bg-panel text-slate-600 border-line" };
             return (
-              <article key={draft.id} className="rounded-md border border-line bg-white p-5">
+              <article key={draft.id} className="rounded-xl border border-line bg-white p-5 shadow-xs">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-semibold text-ink">{draft.title || draft.draft_type}</h2>
+                      <h2 className="text-base font-semibold tracking-tight text-ink">{draft.title || draft.draft_type}</h2>
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${meta.className}`}>{meta.label}</span>
-                      <span className={`rounded-full px-2.5 py-1 text-xs ${draft.risk_level === "high" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>{draft.risk_level === "high" ? "高风险" : "中低风险"}</span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${draft.risk_level === "high" ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>
+                        {draft.risk_level === "high" ? "高风险" : "中低风险"}
+                      </span>
                     </div>
-                    <div className="mt-2 text-xs text-slate-500">{draft.draft_type} · {draft.target_type} · {new Date(draft.created_at).toLocaleString("zh-CN")}</div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      {draft.draft_type} · {draft.target_type} · {new Date(draft.created_at).toLocaleString("zh-CN")}
+                    </div>
                   </div>
                   {draft.status === "pending_confirmation" && (
                     <div className="flex gap-2">
-                      <button className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60" disabled={loading} onClick={() => changeDraft(draft.id, "confirm")}><Check className="h-4 w-4" />确认执行</button>
-                      <button className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-2 text-sm text-slate-600 transition hover:bg-panel disabled:opacity-60" disabled={loading} onClick={() => changeDraft(draft.id, "cancel")}><X className="h-4 w-4" />取消</button>
+                      <button
+                        className="inline-flex h-8 items-center gap-1 rounded-md bg-accent px-3 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={loading}
+                        onClick={() => changeDraft(draft.id, "confirm")}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        确认执行
+                      </button>
+                      <button
+                        className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-panel disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={loading}
+                        onClick={() => changeDraft(draft.id, "cancel")}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        取消
+                      </button>
                     </div>
                   )}
                 </div>
-                <div className="mt-4 whitespace-pre-wrap rounded-md border-l-4 border-teal-500 bg-panel px-4 py-3 text-sm leading-7 text-slate-700">{draft.content}</div>
-                {draft.status === "executed" && <div className="mt-3 flex items-center gap-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" />人工确认完成，执行结果和操作者已经写入审计记录。</div>}
-                {draft.error_message && <div className="mt-3 rounded-md bg-rose-50 p-3 text-sm text-rose-700">{draft.error_message}</div>}
+                <div className="mt-4 whitespace-pre-wrap rounded-lg bg-accent-soft/60 px-4 py-3 text-sm leading-7 text-slate-700">{draft.content}</div>
+                {draft.status === "executed" && (
+                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    人工确认完成，执行结果和操作者已经写入审计记录。
+                  </div>
+                )}
+                {draft.error_message && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{draft.error_message}</div>}
               </article>
             );
           })}
-          {drafts.length === 0 && <div className="rounded-md border border-dashed border-line bg-white p-5 text-sm text-slate-500">暂无安全草稿。</div>}
+          {drafts.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-line bg-white/60 px-6 py-12 text-center">
+              <span className="grid h-10 w-10 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+                <FileText className="h-5 w-5" />
+              </span>
+              <div className="mt-3 text-sm font-medium text-ink">暂无安全草稿</div>
+              <p className="mt-1 text-sm text-slate-500">在左侧填写内容后保存为待确认草稿。</p>
+            </div>
+          )}
 
-          <section className="rounded-md border border-line bg-white p-5">
-            <div className="flex items-center gap-2 font-semibold text-ink"><Send className="h-4 w-4 text-teal-700" />审计时间线</div>
-            <div className="mt-4 space-y-0">
-              {audits.slice(0, 10).map((item, index) => (
-                <div key={item.id} className="relative flex gap-3 pb-4">
-                  {index < Math.min(audits.length, 10) - 1 && <span className="absolute left-[7px] top-4 h-full w-px bg-line" />}
-                  <span className={`relative mt-1 h-4 w-4 shrink-0 rounded-full border-4 border-white ${item.status === "success" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                  <div><div className="text-sm font-medium text-ink">{auditLabel(item.action)}</div><div className="mt-1 text-xs text-slate-500">{item.status} · {new Date(item.created_at).toLocaleString("zh-CN")}</div></div>
+          <Card>
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+                <Send className="h-4 w-4" />
+              </span>
+              <h2 className="text-base font-semibold tracking-tight text-ink">审计时间线</h2>
+              <span className="ml-auto rounded-full border border-line bg-panel px-2.5 py-1 text-xs font-medium text-slate-500">{audits.length} 条</span>
+            </div>
+            <div className="mt-4">
+              {visibleAudits.map((item, index) => (
+                <div key={item.id} className="relative flex gap-3 pb-4 last:pb-0">
+                  {index < visibleAudits.length - 1 && <span className="absolute left-[4px] top-4 h-full w-px bg-line" />}
+                  <span className={`relative mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${item.status === "success" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-ink">{auditLabel(item.action)}</div>
+                    <div className="mt-0.5 text-xs text-slate-500">{item.status} · {new Date(item.created_at).toLocaleString("zh-CN")}</div>
+                  </div>
                 </div>
               ))}
-              {audits.length === 0 && <div className="text-sm text-slate-500">暂无审计记录。</div>}
+              {audits.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/40 px-4 py-6 text-center text-sm text-slate-500">暂无审计记录。</div>}
             </div>
-          </section>
+          </Card>
         </div>
       </div>
     </>
   );
 }
 
-function Summary({ icon: Icon, label, value, tone = "teal" }: { icon: typeof FileText; label: string; value: number; tone?: "teal" | "amber" | "green" }) {
-  const color = tone === "amber" ? "text-amber-600" : tone === "green" ? "text-emerald-600" : "text-teal-700";
-  return <div className="flex items-center gap-3"><Icon className={`h-5 w-5 ${color}`} /><div><div className="text-xs text-slate-500">{label}</div><div className="mt-1 text-xl font-semibold text-ink">{value}</div></div></div>;
+function Summary({
+  icon: Icon,
+  label,
+  value,
+  tone = "accent"
+}: {
+  icon: typeof FileText;
+  label: string;
+  value: number;
+  tone?: "accent" | "amber" | "green";
+}) {
+  const badge = tone === "amber" ? "bg-amber-50 text-amber-600" : tone === "green" ? "bg-emerald-50 text-emerald-600" : "bg-accent-soft text-indigo-600";
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-white p-4 shadow-xs">
+      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-lg ${badge}`}>
+        <Icon className="h-5 w-5" />
+      </span>
+      <div>
+        <div className="text-xs text-slate-500">{label}</div>
+        <div className="mt-0.5 text-xl font-semibold text-ink">{value}</div>
+      </div>
+    </div>
+  );
 }
 
 function auditLabel(action: string) {

@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Folder, Trash2 } from "lucide-react";
+import { Clock3, Folder, FolderGit2, KeyRound, PlugZap, RefreshCw, ScrollText, Trash2, Webhook } from "lucide-react";
 
 import { Card, PageTitle, PrimaryButton } from "@/components/ui/card";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
-import { API_BASE_URL } from "@/lib/api";
+import { API_BASE_URL, apiDelete, apiGet, apiPost } from "@/lib/api";
 import type { Repository } from "@/lib/types";
 
 type RepoConnectResult = {
@@ -39,6 +38,12 @@ const providers = [
   { value: "gitlab", label: "GitLab", hint: "界面已预留，真实同步需要单独适配 GitLab API。" },
   { value: "gitee", label: "Gitee", hint: "界面已预留，真实同步需要单独适配 Gitee API。" }
 ];
+
+const fieldClass =
+  "h-10 w-full rounded-md border border-line bg-white px-3 text-sm text-ink outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-panel disabled:text-slate-500";
+
+const smallButtonClass =
+  "inline-flex h-8 items-center justify-center gap-1 rounded-md border border-line bg-white px-3 text-xs font-medium text-slate-600 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60";
 
 export default function ReposPage() {
   const [repos, setRepos] = useState<Repository[]>([]);
@@ -149,210 +154,287 @@ export default function ReposPage() {
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
-          <div className="grid gap-4">
-            <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line bg-slate-50 p-1">
-              <button
-                type="button"
-                onClick={() => setSource("remote")}
-                className={`h-9 rounded px-3 text-sm font-medium transition ${source === "remote" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"}`}
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+              <PlugZap className="h-4 w-4" />
+            </span>
+            <h2 className="text-base font-semibold tracking-tight text-ink">连接仓库</h2>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-1 rounded-lg border border-line bg-panel p-1">
+            <button
+              type="button"
+              onClick={() => setSource("remote")}
+              className={`h-8 rounded-md text-sm font-medium transition-colors ${
+                source === "remote" ? "bg-white text-ink shadow-xs ring-1 ring-line" : "text-slate-500 hover:text-ink"
+              }`}
+            >
+              GitHub 地址
+            </button>
+            <button
+              type="button"
+              onClick={() => setSource("local")}
+              className={`h-8 rounded-md text-sm font-medium transition-colors ${
+                source === "local" ? "bg-white text-ink shadow-xs ring-1 ring-line" : "text-slate-500 hover:text-ink"
+              }`}
+            >
+              本地仓库
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_minmax(0,1fr)]">
+            <label className="text-sm font-medium text-slate-700">
+              托管平台
+              <select
+                className={`mt-2 ${fieldClass}`}
+                value={provider}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setProvider(next);
+                  if (next === "github") setApiBaseUrl("https://api.github.com");
+                  if (next === "github_compatible") setApiBaseUrl("https://api.example.com");
+                  if (next === "gitlab") setApiBaseUrl("https://gitlab.com/api/v4");
+                  if (next === "gitee") setApiBaseUrl("https://gitee.com/api/v5");
+                }}
               >
-                GitHub 地址
-              </button>
-              <button
-                type="button"
-                onClick={() => setSource("local")}
-                className={`h-9 rounded px-3 text-sm font-medium transition ${source === "local" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"}`}
-              >
-                本地仓库
-              </button>
+                {providers.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {source === "remote" ? (
+              <>
+                <label className="text-sm font-medium text-slate-700">
+                  Owner / Namespace
+                  <input
+                    className={`mt-2 ${fieldClass}`}
+                    value={owner}
+                    onChange={(event) => setOwner(event.target.value)}
+                    placeholder="296569015"
+                  />
+                </label>
+
+                <label className="text-sm font-medium text-slate-700">
+                  Repository
+                  <input
+                    className={`mt-2 ${fieldClass}`}
+                    value={repo}
+                    onChange={(event) => setRepo(event.target.value)}
+                    placeholder="clowder-ai"
+                  />
+                </label>
+              </>
+            ) : (
+              <label className="text-sm font-medium text-slate-700 lg:col-span-2">
+                本地仓库路径
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className={`min-w-0 flex-1 ${fieldClass}`}
+                    value={localPath}
+                    onChange={(event) => setLocalPath(event.target.value)}
+                    placeholder="例如 D:\\code\\my-repo"
+                  />
+                  <span className="inline-flex w-10 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-slate-400">
+                    <Folder className="h-4 w-4" />
+                  </span>
+                </div>
+              </label>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-lg border border-accent-line bg-accent-soft/70 p-3 text-sm leading-6 text-slate-600">
+            <div className="font-medium text-indigo-800">{selectedProvider.label}</div>
+            <div className="mt-0.5">{selectedProvider.hint}</div>
+          </div>
+
+          <div className="mt-5 border-t border-line pt-5">
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+                <KeyRound className="h-4 w-4" />
+              </span>
+              <h2 className="text-base font-semibold tracking-tight text-ink">认证与代码缓存</h2>
             </div>
 
-            <div className="grid gap-4 lg:grid-cols-[260px_1fr_1fr]">
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
-                托管平台
-                <select
-                  className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                  value={provider}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    setProvider(next);
-                    if (next === "github") setApiBaseUrl("https://api.github.com");
-                    if (next === "github_compatible") setApiBaseUrl("https://api.example.com");
-                    if (next === "gitlab") setApiBaseUrl("https://gitlab.com/api/v4");
-                    if (next === "gitee") setApiBaseUrl("https://gitee.com/api/v5");
-                  }}
-                >
-                  {providers.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
+                API Base URL
+                <input
+                  className={`mt-2 ${fieldClass}`}
+                  value={apiBaseUrl}
+                  disabled={provider === "github"}
+                  onChange={(event) => setApiBaseUrl(event.target.value)}
+                />
               </label>
 
-              {source === "remote" ? (
-                <>
-                  <label className="text-sm font-medium text-slate-700">
-                    Owner / Namespace
-                    <input
-                      className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                      value={owner}
-                      onChange={(event) => setOwner(event.target.value)}
-                      placeholder="296569015"
-                    />
-                  </label>
+              <label className="text-sm font-medium text-slate-700">
+                Access Token
+                <input
+                  type="password"
+                  className={`mt-2 ${fieldClass}`}
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                  placeholder="public repo 可留空，私有仓库需要 token"
+                />
+              </label>
 
-                  <label className="text-sm font-medium text-slate-700">
-                    Repository
-                    <input
-                      className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                      value={repo}
-                      onChange={(event) => setRepo(event.target.value)}
-                      placeholder="clowder-ai"
-                    />
-                  </label>
-                </>
-              ) : (
+              {source === "remote" && (
                 <label className="text-sm font-medium text-slate-700 lg:col-span-2">
-                  本地仓库路径
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                      value={localPath}
-                      onChange={(event) => setLocalPath(event.target.value)}
-                      placeholder="例如 D:\\code\\my-repo"
-                    />
-                    <span className="inline-flex w-10 shrink-0 items-center justify-center rounded-md border border-line bg-white text-slate-500">
-                      <Folder className="h-4 w-4" />
-                    </span>
-                  </div>
+                  下载父目录
+                  <input
+                    className={`mt-2 ${fieldClass}`}
+                    value={cloneParentDir}
+                    onChange={(event) => setCloneParentDir(event.target.value)}
+                    placeholder="例如 D:\\code\\repos，留空则使用默认缓存目录"
+                  />
                 </label>
               )}
             </div>
           </div>
 
-          <div className="mt-4 rounded-md border border-teal-100 bg-teal-50/70 p-3 text-sm leading-6 text-slate-700">
-            <div className="font-medium text-teal-900">{selectedProvider.label}</div>
-            <div>{selectedProvider.hint}</div>
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <label className="text-sm font-medium text-slate-700">
-              API Base URL
-              <input
-                className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 disabled:bg-slate-100"
-                value={apiBaseUrl}
-                disabled={provider === "github"}
-                onChange={(event) => setApiBaseUrl(event.target.value)}
-              />
-            </label>
-
-            <label className="text-sm font-medium text-slate-700">
-              Access Token
-              <input
-                type="password"
-                className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                value={token}
-                onChange={(event) => setToken(event.target.value)}
-                placeholder="public repo 可留空，私有仓库需要 token"
-              />
-            </label>
-
-            {source === "remote" && (
-              <label className="text-sm font-medium text-slate-700 lg:col-span-2">
-                下载父目录
-                <input
-                  className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                  value={cloneParentDir}
-                  onChange={(event) => setCloneParentDir(event.target.value)}
-                  placeholder="例如 D:\\code\\repos，留空则使用默认缓存目录"
-                />
-              </label>
-            )}
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-3">
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-5">
             <PrimaryButton
               onClick={connect}
               disabled={loading || !supportsRealConnect || (source === "remote" ? !owner.trim() || !repo.trim() : !localPath.trim())}
             >
               {loading ? "连接并同步中..." : "连接并自动同步"}
             </PrimaryButton>
+            {!supportsRealConnect && (
+              <p className="text-sm text-amber-700">当前平台已在界面预留，但真实 API 同步尚未实现。请选择 GitHub 或 GitHub-compatible API。</p>
+            )}
           </div>
 
-          {!supportsRealConnect && (
-            <p className="mt-3 text-sm text-amber-700">当前平台已在界面预留，但真实 API 同步尚未实现。请选择 GitHub 或 GitHub-compatible API。</p>
+          {result && (
+            <div className="mt-4 rounded-lg border border-line bg-panel p-3">
+              <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <ScrollText className="h-3.5 w-3.5" />
+                操作结果
+              </div>
+              <pre className="max-h-56 overflow-auto font-mono text-xs leading-6 text-slate-700">{result}</pre>
+            </div>
           )}
-
-          {result && <pre className="mt-4 overflow-auto rounded-md border border-slate-800 bg-slate-950 p-4 text-xs text-slate-100">{result}</pre>}
         </Card>
 
-        <Card>
+        <Card className="self-start">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="font-semibold text-ink">已连接仓库</h2>
-            <span className="rounded-full bg-panel px-2.5 py-1 text-xs text-slate-500">{repos.length} 个</span>
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+                <FolderGit2 className="h-4 w-4" />
+              </span>
+              <h2 className="text-base font-semibold tracking-tight text-ink">已连接仓库</h2>
+            </div>
+            <span className="rounded-full border border-line bg-panel px-2.5 py-1 text-xs font-medium text-slate-500">{repos.length} 个</span>
           </div>
+
           <div className="mt-4 space-y-3">
-            {repos.length === 0 && <p className="text-sm text-slate-600">还没有仓库。请连接一个真实 Git 仓库。</p>}
-            {repos.map((item) => (
-              <div
-                key={item.id}
-                className={`rounded-lg border p-4 transition ${selectedRepoId === item.id ? "border-teal-300 bg-teal-50/70" : "border-line bg-white"}`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="font-medium text-ink">{item.full_name}</div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {item.provider || "github"} · {item.default_branch || "main"}
-                    </div>
-                    {item.local_path && <div className="mt-1 break-all text-xs text-slate-500">{item.checkout_mode === "local" ? "本地仓库" : "代码路径"}：{item.local_path}</div>}
-                  </div>
-                  <span className="rounded-full bg-panel px-2.5 py-1 text-xs text-slate-500">{selectedRepoId === item.id ? "当前查看" : "已连接"}</span>
-                </div>
-                <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{item.description || "暂无仓库描述"}</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => selectRepo(item.id)}
-                    className="rounded-md border border-line bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-teal-200 hover:bg-teal-50"
-                  >
-                    设为当前查看
-                  </button>
-                  <button
-                    onClick={() => refreshRepo(item.id)}
-                    disabled={loading}
-                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
-                  >
-                    立即刷新
-                  </button>
-                  <button
-                    onClick={() => deleteRepo(item)}
-                    disabled={loading}
-                    className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    删除
-                  </button>
-                </div>
+            {repos.length === 0 && (
+              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel/40 px-6 py-10 text-center">
+                <span className="grid h-10 w-10 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+                  <FolderGit2 className="h-5 w-5" />
+                </span>
+                <div className="mt-3 text-sm font-medium text-ink">还没有仓库</div>
+                <p className="mt-1 text-sm text-slate-500">请连接一个真实 Git 仓库。</p>
               </div>
-            ))}
+            )}
+
+            {repos.map((item) => {
+              const active = selectedRepoId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-lg border p-4 transition-colors ${
+                    active ? "border-indigo-300 bg-indigo-50/70" : "border-line bg-white hover:border-indigo-200 hover:bg-indigo-50/30"
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-ink">{item.full_name}</div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span className="rounded-full border border-line bg-white/80 px-2 py-0.5 font-medium text-slate-600">
+                          {item.provider || "github"}
+                        </span>
+                        <span>{item.default_branch || "main"}</span>
+                      </div>
+                      {item.local_path && (
+                        <div className="mt-2 break-all rounded-md border border-line bg-white/70 px-2 py-1 font-mono text-[11px] leading-5 text-slate-500">
+                          {item.checkout_mode === "local" ? "本地仓库" : "代码路径"}：{item.local_path}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
+                        active ? "border-indigo-200 bg-white text-indigo-700" : "border-line bg-panel text-slate-500"
+                      }`}
+                    >
+                      {active ? "当前查看" : "已连接"}
+                    </span>
+                  </div>
+                  <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{item.description || "暂无仓库描述"}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button onClick={() => selectRepo(item.id)} className={smallButtonClass}>
+                      设为当前查看
+                    </button>
+                    <button
+                      onClick={() => refreshRepo(item.id)}
+                      disabled={loading}
+                      className="inline-flex h-8 items-center justify-center rounded-md bg-accent px-3 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      立即刷新
+                    </button>
+                    <button
+                      onClick={() => deleteRepo(item)}
+                      disabled={loading}
+                      className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-rose-200 bg-white px-3 text-xs font-medium text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      删除
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
 
       <Card className="mt-4">
-        <h2 className="font-semibold text-ink">生产同步策略</h2>
-        <div className="mt-3 grid gap-3 text-sm leading-6 text-slate-600 md:grid-cols-3">
-          <div className="rounded-md bg-panel p-3">
-            <div className="font-medium text-ink">连接后自动同步</div>
-            <p className="mt-1">仓库校验成功后，后端会立即调度一次后台同步。</p>
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-soft text-indigo-600">
+            <RefreshCw className="h-4 w-4" />
+          </span>
+          <h2 className="text-base font-semibold tracking-tight text-ink">生产同步策略</h2>
+        </div>
+        <div className="mt-4 divide-y divide-line rounded-lg border border-line">
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-soft text-indigo-600">
+              <RefreshCw className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-ink">连接后自动同步</div>
+              <p className="mt-1 text-sm leading-6 text-slate-600">仓库校验成功后，后端会立即调度一次后台同步。</p>
+            </div>
           </div>
-          <div className="rounded-md bg-panel p-3">
-            <div className="font-medium text-ink">Webhook 实时触发</div>
-            <p className="mt-1 break-all">GitHub Webhook URL：{API_BASE_URL}/api/webhooks/github</p>
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-soft text-indigo-600">
+              <Webhook className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-ink">Webhook 实时触发</div>
+              <p className="mt-1.5 break-all rounded-md border border-line bg-panel px-2 py-1 font-mono text-[11px] leading-5 text-slate-600">
+                GitHub Webhook URL：{API_BASE_URL}/api/webhooks/github
+              </p>
+            </div>
           </div>
-          <div className="rounded-md bg-panel p-3">
-            <div className="font-medium text-ink">定时同步兜底</div>
-            <p className="mt-1">后端启动后会定时刷新已连接仓库，默认 5 分钟一次。</p>
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-accent-soft text-indigo-600">
+              <Clock3 className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-ink">定时同步兜底</div>
+              <p className="mt-1 text-sm leading-6 text-slate-600">后端启动后会定时刷新已连接仓库，默认 5 分钟一次。</p>
+            </div>
           </div>
         </div>
       </Card>

@@ -867,20 +867,20 @@ function formatRelativeTime(value?: string | null) {
 }
 
 const issueCategoryMeta = [
-  { key: "unanswered", label: "未回复", color: "text-[#f47b5b]" },
-  { key: "discussing", label: "讨论中", color: "text-[#38a7f4]" },
-  { key: "decision", label: "待决策", color: "text-[#f08a00]" },
-  { key: "accepted", label: "已处理", color: "text-[#20a35b]" },
-  { key: "rejected", label: "已拒绝", color: "text-[#6b7280]" },
-  { key: "closed", label: "已关闭", color: "text-[#7c8794]" }
+  { key: "unanswered", label: "未回复", color: "text-rose-600" },
+  { key: "discussing", label: "讨论中", color: "text-sky-600" },
+  { key: "decision", label: "待决策", color: "text-amber-600" },
+  { key: "accepted", label: "已处理", color: "text-emerald-600" },
+  { key: "rejected", label: "已拒绝", color: "text-slate-500" },
+  { key: "closed", label: "已关闭", color: "text-slate-400" }
 ] as const;
 
 const prCategoryMeta = [
-  { key: "reviewing", label: "审核中", color: "text-[#38a7f4]" },
-  { key: "needsOwner", label: "需主审", color: "text-[#f08a00]" },
-  { key: "conflict", label: "有冲突", color: "text-[#f47b5b]" },
-  { key: "done", label: "已完成", color: "text-[#20a35b]" },
-  { key: "rejected", label: "已拒绝", color: "text-[#6b7280]" }
+  { key: "reviewing", label: "审核中", color: "text-sky-600" },
+  { key: "needsOwner", label: "需主审", color: "text-amber-600" },
+  { key: "conflict", label: "有冲突", color: "text-rose-600" },
+  { key: "done", label: "已完成", color: "text-emerald-600" },
+  { key: "rejected", label: "已拒绝", color: "text-slate-500" }
 ] as const;
 
 export default function DashboardPage() {
@@ -2459,59 +2459,65 @@ export default function DashboardPage() {
 
   return (
     <div
-      className="relative grid h-[calc(100vh-24px)] min-h-0 overflow-hidden rounded-lg border border-line bg-white/80 shadow-sm"
+      className="relative grid h-[calc(100vh-81px)] min-h-0 overflow-hidden rounded-xl border border-line bg-white shadow-xs"
       style={{ gridTemplateColumns: `${isSidebarCollapsed ? "56px" : "300px"} minmax(0,1fr)`, transition: "grid-template-columns 260ms ease" }}
     >
-      <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-[#fbf7f2] transition-all duration-300">
-        <div className={`border-b border-line ${isSidebarCollapsed ? "p-2" : "p-4"}`}>
-          <div className={`flex items-center ${isSidebarCollapsed ? "flex-col gap-3" : "gap-3"}`}>
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">RL</div>
-            {!isSidebarCollapsed && (
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-ink">RepoLens AI</div>
-                <div className="truncate text-xs text-slate-500">研发团队 PR / Issue 智能协作 Agent</div>
-              </div>
-            )}
+      <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-panel transition-all duration-300">
+        {isSidebarCollapsed ? (
+          <div className="flex flex-col items-center gap-1 border-b border-line p-2">
             <button
-              onClick={() => setIsSidebarCollapsed((value) => !value)}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-white text-slate-600 transition hover:bg-teal-50"
-              title={isSidebarCollapsed ? "展开项目侧边栏" : "隐藏项目侧边栏"}
+              onClick={() => setIsSidebarCollapsed(false)}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700"
+              title="展开项目侧边栏"
             >
-              {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+            <button onClick={openAddProject} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white hover:text-ink" title="添加项目">
+              <Plus className="h-4 w-4" />
+            </button>
+            <button
+              onClick={refreshSelectedRepo}
+              disabled={!selectedRepo || syncing}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white hover:text-ink disabled:opacity-50"
+              title="刷新当前项目"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
             </button>
           </div>
-
-          {isSidebarCollapsed ? (
-            <div className="mt-4 flex flex-col items-center gap-3">
-              <button onClick={openAddProject} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-700 transition hover:bg-white" title="添加项目">
-                <Plus className="h-4 w-4" />
-              </button>
+        ) : (
+          <div className="border-b border-line px-4 pb-3 pt-4">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Projects</div>
               <button
-                onClick={refreshSelectedRepo}
-                disabled={!selectedRepo || syncing}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-700 transition hover:bg-white disabled:opacity-50"
-                title="刷新当前项目"
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-white hover:text-slate-700"
+                title="隐藏项目侧边栏"
               >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                <PanelLeftClose className="h-4 w-4" />
               </button>
             </div>
-          ) : (
-            <div className="mt-5 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-medium uppercase tracking-[0.18em] text-accent">Projects</div>
-                <h2 className="mt-1 text-lg font-semibold text-ink">项目</h2>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold tracking-tight text-ink">项目</h2>
+                <span className="rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-500">{repos.length}</span>
               </div>
-              <button onClick={openAddProject} className="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white">
+              <button
+                onClick={openAddProject}
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover"
+              >
                 <Plus className="h-3.5 w-3.5" />
-                添加项目
+                添加
               </button>
+            </div>
+          </div>
+        )}
+
+        <div className={`min-h-0 flex-1 overflow-y-auto ${isSidebarCollapsed ? "p-2" : "px-2 py-2"}`}>
+          {repos.length === 0 && !isSidebarCollapsed && (
+            <div className="rounded-lg border border-dashed border-line bg-white/60 p-3 text-sm leading-6 text-slate-500">
+              还没有项目。先添加一个 GitHub 仓库或本地仓库。
             </div>
           )}
-        </div>
-
-        <div className={`min-h-0 flex-1 overflow-y-auto ${isSidebarCollapsed ? "p-2" : "px-3 py-2"}`}>
-          {repos.length === 0 && !isSidebarCollapsed && <div className="rounded-md bg-white p-3 text-sm leading-6 text-slate-600">还没有项目。请先添加一个项目。</div>}
-          {!isSidebarCollapsed && repos.length > 0 && <div className="mb-2 px-1 text-xs text-slate-400">项目</div>}
           {repos.map((repo) => {
             const conversations = conversationMap[repo.id] ?? [];
             const isExpanded = expandedRepoIds[repo.id] ?? selectedRepo?.id === repo.id;
@@ -2520,8 +2526,8 @@ export default function DashboardPage() {
               <button
                 key={repo.id}
                 onClick={() => selectProject(repo).catch(() => undefined)}
-                className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-md transition ${
-                  isSelectedRepo ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:bg-white"
+                className={`mb-2 inline-flex h-9 w-9 items-center justify-center rounded-lg transition ${
+                  isSelectedRepo ? "bg-white text-indigo-600 shadow-xs" : "text-slate-500 hover:bg-white hover:text-ink"
                 }`}
                 title={repo.full_name}
               >
@@ -2529,13 +2535,13 @@ export default function DashboardPage() {
               </button>
             ) : (
               <div key={repo.id} className="mb-1">
-                <div className={`group flex h-9 items-center gap-1 rounded-md px-1 transition ${isSelectedRepo ? "bg-[#ecebea]" : "hover:bg-[#eeeeec]"}`}>
-                  <button onClick={() => selectProject(repo).catch(() => undefined)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-white">
+                <div className={`group flex h-9 items-center gap-1 rounded-lg px-1.5 transition ${isSelectedRepo ? "bg-white shadow-xs" : "hover:bg-white/70"}`}>
+                  <button onClick={() => selectProject(repo).catch(() => undefined)} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-panel hover:text-slate-600">
                     <ChevronDown className={`h-3.5 w-3.5 transition ${isExpanded ? "" : "-rotate-90"}`} />
                   </button>
                   <button onClick={() => selectProject(repo).catch(() => undefined)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                    <Folder className="h-4 w-4 shrink-0 text-slate-500" />
-                    <span className="truncate text-sm text-slate-700" title={repo.full_name}>
+                    <Folder className={`h-4 w-4 shrink-0 ${isSelectedRepo ? "text-indigo-500" : "text-slate-400"}`} />
+                    <span className={`truncate text-sm ${isSelectedRepo ? "font-medium text-ink" : "text-slate-600"}`} title={repo.full_name}>
                       {repo.name || repo.full_name}
                     </span>
                   </button>
@@ -2544,7 +2550,7 @@ export default function DashboardPage() {
                       event.stopPropagation();
                       addConversation(repo).catch(() => undefined);
                     }}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-white hover:text-ink group-hover:opacity-100"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 opacity-0 transition hover:bg-panel hover:text-ink group-hover:opacity-100"
                     title="添加会话"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -2554,21 +2560,21 @@ export default function DashboardPage() {
                       event.stopPropagation();
                       removeRepo(repo).catch(() => undefined);
                     }}
-                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
                     title="移除项目"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
                 {isExpanded && (
-                  <div className="ml-7 mt-1 space-y-0.5">
+                  <div className="ml-6 mt-0.5 space-y-0.5 border-l border-line pl-2">
                     {conversations.length === 0 && <div className="px-2 py-1.5 text-xs text-slate-400">暂无会话</div>}
                     {conversations.map((conversation) => (
                       <div key={conversation.id} className="group/conversation flex items-center gap-1">
                         <button
                           onClick={() => selectConversation(repo, conversation).catch(() => undefined)}
                           className={`flex h-8 min-w-0 flex-1 items-center justify-between gap-2 rounded-md px-2 text-left text-sm transition ${
-                            selectedConversationId === conversation.id ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:bg-white"
+                            selectedConversationId === conversation.id ? "bg-white font-medium text-ink shadow-xs" : "text-slate-600 hover:bg-white/70 hover:text-ink"
                           }`}
                           title={conversation.title}
                         >
@@ -2577,7 +2583,7 @@ export default function DashboardPage() {
                         </button>
                         <button
                           onClick={() => removeConversation(repo, conversation).catch(() => undefined)}
-                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover/conversation:opacity-100"
+                          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover/conversation:opacity-100"
                           title="删除会话"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -2596,7 +2602,7 @@ export default function DashboardPage() {
             <button
               onClick={refreshSelectedRepo}
               disabled={!selectedRepo || syncing}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-line bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-teal-50 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
             >
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "刷新中..." : "刷新当前项目"}
@@ -2606,59 +2612,67 @@ export default function DashboardPage() {
       </aside>
 
       <section
-        className="grid min-h-0 min-w-0 bg-[#fffaf6]"
+        className="grid min-h-0 min-w-0 bg-white"
         style={{ gridTemplateColumns: `minmax(460px,1fr) 8px ${workspaceWidth}px`, gridTemplateRows: "auto minmax(0,1fr)" }}
       >
-        <section className="col-start-1 row-start-1 shrink-0 border-b border-line bg-white/90 px-4 py-2">
-          <div className="flex items-start justify-between gap-3">
+        <section className="col-start-1 row-start-1 shrink-0 border-b border-line bg-white px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h2 className="font-semibold text-ink">总览</h2>
-                <span className="text-xs text-slate-500">当前代码仓</span>
-                <span className="truncate text-sm font-semibold text-ink">{selectedRepo?.full_name || "未选择仓库"}</span>
-                {selectedConversation && <span className="rounded-full bg-panel px-2 py-0.5 text-xs text-slate-600">会话：{selectedConversation.title}</span>}
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                <h2 className="text-base font-semibold tracking-tight text-ink">总览</h2>
+                <span className="h-3.5 w-px bg-line" />
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-slate-500">
+                  <Folder className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span className="truncate font-medium text-slate-600">{selectedRepo?.full_name || "未选择仓库"}</span>
+                </span>
+                {selectedConversation && (
+                  <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] text-slate-500">会话：{selectedConversation.title}</span>
+                )}
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-3">
-              <div className="rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">Production Workspace</div>
-              <button onClick={openAddProject} className="text-xs text-accent hover:underline">
+            <div className="flex shrink-0 items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-medium text-indigo-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+                Production Workspace
+              </span>
+              <button onClick={openAddProject} className="text-xs font-medium text-indigo-600 transition hover:text-indigo-800">
                 管理项目
               </button>
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:grid-cols-6">
             <MetricCard icon={ListTodo} label="待处理 Issue" value={openIssues.length} />
-            <MetricCard icon={GitPullRequest} label="待 Review PR" value={openPrs.length} />
+            <MetricCard icon={GitPullRequest} label="待 Review" value={openPrs.length} />
             <MetricCard icon={CheckCircle2} label="已处理 Issue" value={handledIssues.length} />
             <MetricCard icon={XCircle} label="已拒绝 Issue" value={rejectedIssues.length} />
-            <MetricCard icon={AlertTriangle} label="失败 CI" value={failedRuns.length} />
+            <MetricCard icon={AlertTriangle} label="失败 CI" value={failedRuns.length} tone="danger" />
             <MetricCard icon={CheckCircle2} label="已合并 PR" value={mergedPrs.length} />
           </div>
         </section>
 
-        <div className="col-start-2 row-span-2 row-start-1 cursor-col-resize border-x border-line bg-slate-100 transition hover:bg-teal-100" onMouseDown={startResize} title="拖拽调整 Workspace 宽度" />
+        <div className="col-start-2 row-span-2 row-start-1 cursor-col-resize border-x border-line bg-panel transition hover:bg-indigo-100" onMouseDown={startResize} title="拖拽调整 Workspace 宽度" />
 
-        <aside className="col-start-3 row-span-2 row-start-1 flex min-h-0 min-w-0 flex-col bg-[#fffaf6]">
-          <div className="border-b border-line bg-white/80 px-4 py-3">
+        <aside className="col-start-3 row-span-2 row-start-1 flex min-h-0 min-w-0 flex-col bg-white">
+          <div className="border-b border-line bg-white px-4 pb-2 pt-3">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="font-semibold text-ink">Workspace</h2>
-              <div className="flex shrink-0 items-center gap-2">
-                <div className="text-[11px] text-slate-500">
-                  Issues: {filteredIssues.length} · PRs: {filteredPrs.length}
-                </div>
-                <button
-                  onClick={refreshSelectedRepo}
-                  disabled={!selectedRepo || syncing}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-line bg-white px-2 text-xs font-medium text-slate-700 transition hover:bg-teal-50 disabled:opacity-60"
-                  title="刷新 Issue/PR/CI"
-                  aria-label="刷新 Issue/PR/CI"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-                  {syncing ? "刷新中" : "刷新"}
-                </button>
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h2 className="text-base font-semibold tracking-tight text-ink">Workspace</h2>
+                <span className="truncate text-[11px] text-slate-400">
+                  Issues {filteredIssues.length} · PRs {filteredPrs.length}
+                </span>
               </div>
+              <button
+                onClick={refreshSelectedRepo}
+                disabled={!selectedRepo || syncing}
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
+                title="刷新 Issue/PR/CI"
+                aria-label="刷新 Issue/PR/CI"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "刷新中" : "刷新"}
+              </button>
             </div>
-            <div className="mt-3 flex gap-1 overflow-x-auto">
+            <div className="mt-3 flex flex-wrap gap-1">
               {workspaceTabs.map((tab) => (
                 <button
                   key={tab}
@@ -2669,8 +2683,10 @@ export default function DashboardPage() {
                     }
                     setWorkspaceTab(tab);
                   }}
-                  className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                    workspaceTab === tab ? "bg-accent text-white" : "bg-panel text-slate-600 hover:bg-teal-50"
+                  className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    workspaceTab === tab
+                      ? "bg-accent text-white shadow-xs"
+                      : "text-slate-500 hover:bg-panel hover:text-ink"
                   }`}
                 >
                   {tab}
@@ -2857,8 +2873,8 @@ export default function DashboardPage() {
           </div>
         </aside>
 
-          <section className="flex min-h-0 min-w-0 flex-col bg-[#fffaf6]">
-            <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <section className="flex min-h-0 min-w-0 flex-col bg-white">
+            <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
               <div className="flex w-full flex-col gap-4">
                 {messages.map((item) => {
                   const isWelcome = item.id.startsWith("welcome-");
@@ -2868,9 +2884,13 @@ export default function DashboardPage() {
                   return (
                     <div key={item.id} className={`flex ${item.role === "user" ? "justify-end" : "justify-start"}`}>
                       <div
-                        className={`${isWelcome ? "w-full max-w-none rounded-md" : "max-w-[80%] rounded-2xl"} px-4 py-3 text-sm leading-7 shadow-sm ${
-                          item.role === "user" ? "bg-[#ffd9ca] text-slate-800" : "border border-line bg-white text-slate-700"
-                        }`}
+                        className={
+                          isWelcome
+                            ? "w-full max-w-none rounded-xl border border-line bg-panel/60 px-4 py-3.5 text-sm leading-7 text-slate-700"
+                            : item.role === "user"
+                              ? "max-w-[80%] rounded-2xl rounded-br-md bg-ink px-4 py-2.5 text-sm leading-7 text-white shadow-xs"
+                              : "max-w-[86%] rounded-2xl rounded-bl-md border border-line bg-white px-4 py-3 text-sm leading-7 text-slate-700 shadow-xs"
+                        }
                       >
                         {item.role === "assistant" ? (
                           <>
@@ -2925,7 +2945,7 @@ export default function DashboardPage() {
                           </div>
                         )}
                         {item.role === "assistant" && item.responsePending && (traceItems.length > 0 || item.content.trim()) && (
-                          <div className="mt-3 flex items-center gap-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-xs text-slate-600">
+                          <div className="mt-3 flex items-center gap-2 rounded-md border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-slate-600">
                             <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />
                             <span>Agent 正在回复，工具结果已收集，正在整理最终回答...</span>
                           </div>
@@ -2960,14 +2980,14 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="border-t border-line bg-white/90 p-4">
+            <div className="border-t border-line bg-white px-4 py-3">
               <div className="w-full">
                 {(promptSuggestions.length > 0 || loadingPrompts) && (
-                  <div className="mb-3 flex items-center gap-2">
+                  <div className="mb-2.5 flex items-center gap-2">
                     <div ref={promptRowRef} className="relative min-w-0 flex-1 overflow-hidden">
                       <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
                       {loadingPrompts && promptSuggestions.length === 0 && (
-                        <span className="shrink-0 rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-slate-500">
+                        <span className="shrink-0 rounded-full border border-line bg-white px-3 py-1.5 text-xs text-slate-500">
                           推荐生成中{promptLoadingDots}
                         </span>
                       )}
@@ -2976,7 +2996,7 @@ export default function DashboardPage() {
                           key={prompt}
                           onClick={() => askAgent(prompt)}
                           disabled={!selectedRepo || loading || loadingPrompts}
-                          className="max-w-full shrink-0 truncate rounded-full border border-line bg-panel px-3 py-1.5 text-xs text-slate-600 transition hover:border-teal-200 hover:bg-teal-50 disabled:opacity-60"
+                          className="max-w-full shrink-0 truncate rounded-full border border-line bg-white px-3 py-1.5 text-xs text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
                           title={prompt}
                         >
                           {prompt}
@@ -3005,7 +3025,7 @@ export default function DashboardPage() {
                       <button
                         onClick={refreshPromptSuggestions}
                         disabled={!selectedRepo || loading || loadingPrompts}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:border-teal-200 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
                         title="刷新推荐提示语"
                         aria-label="刷新推荐提示语"
                       >
@@ -3014,10 +3034,10 @@ export default function DashboardPage() {
                     )}
                   </div>
                 )}
-                <div className="flex items-stretch gap-3">
+                <div className="flex items-stretch gap-2">
                   <textarea
-                    className={`max-h-40 min-h-[5.5rem] flex-1 resize-none rounded-md border bg-white px-3 py-3 text-sm leading-6 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 ${
-                      planMode ? "border-teal-200" : "border-line"
+                    className={`max-h-40 min-h-[5.5rem] flex-1 resize-none rounded-xl border bg-white px-3.5 py-3 text-sm leading-6 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${
+                      planMode ? "border-indigo-300 ring-2 ring-indigo-100" : "border-line"
                     }`}
                     value={message}
                     onChange={(event) => setMessage(event.target.value)}
@@ -3031,16 +3051,16 @@ export default function DashboardPage() {
                       }
                     }}
                   />
-                  <div className="flex w-12 shrink-0 flex-col gap-2">
+                  <div className="flex w-11 shrink-0 flex-col gap-2">
                     <button
                       type="button"
                       onClick={() => setPlanMode((value) => !value)}
                       disabled={loading}
                       aria-pressed={planMode}
-                      className={`inline-flex h-8 w-12 items-center justify-center rounded-md border transition disabled:opacity-60 ${
+                      className={`inline-flex h-9 w-11 items-center justify-center rounded-lg border transition disabled:opacity-50 ${
                         planMode
-                          ? "border-teal-600 bg-teal-600 text-white shadow-sm"
-                          : "border-line bg-white text-slate-500 hover:border-teal-200 hover:bg-teal-50"
+                          ? "border-accent bg-accent text-white shadow-xs"
+                          : "border-line bg-white text-slate-500 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600"
                       }`}
                       title={planMode ? "切换到对话模式" : "切换到计划模式"}
                     >
@@ -3049,7 +3069,7 @@ export default function DashboardPage() {
                     <button
                       onClick={() => (loading ? stopAgentResponse() : planMode ? createWorkflowPlan() : askAgent())}
                       disabled={!selectedRepo || (!loading && !message.trim())}
-                      className="inline-flex min-h-12 flex-1 items-center justify-center rounded-md bg-accent text-white transition hover:bg-teal-700 disabled:opacity-60"
+                      className="inline-flex min-h-12 flex-1 items-center justify-center rounded-lg bg-accent text-white shadow-xs transition hover:bg-accent-hover disabled:bg-slate-200 disabled:text-slate-400"
                       title={loading ? "停止响应" : "发送"}
                     >
                       {loading ? <Square className="h-4 w-4 fill-current" /> : <Send className="h-5 w-5" />}
@@ -3146,11 +3166,11 @@ function WorkflowPlanCard({
 }) {
   const statusLabel = status === "executing" ? "执行中" : status === "done" ? "已执行" : status === "error" ? "执行失败" : "等待确认";
   return (
-    <div className="rounded-md border border-teal-100 bg-teal-50/60 p-3 text-xs leading-5 text-slate-700">
+    <div className="rounded-md border border-indigo-100 bg-indigo-50/60 p-3 text-xs leading-5 text-slate-700">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 font-semibold text-ink">
-            <ListTodo className="h-4 w-4 text-teal-700" />
+            <ListTodo className="h-4 w-4 text-indigo-600" />
             <span>计划模式</span>
             <span className="rounded-md bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">{statusLabel}</span>
           </div>
@@ -3160,7 +3180,7 @@ function WorkflowPlanCard({
           type="button"
           onClick={onExecute}
           disabled={disabled || status === "executing" || status === "done"}
-          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 text-xs font-medium text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
         >
           {status === "executing" ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
           <span>{status === "done" ? "已执行" : status === "executing" ? "执行中" : "执行计划"}</span>
@@ -3168,7 +3188,7 @@ function WorkflowPlanCard({
       </div>
       <div className="mt-3 space-y-2">
         {plan.tasks.map((task, index) => (
-          <div key={task.id} className="rounded-md border border-teal-100 bg-white px-3 py-2">
+          <div key={task.id} className="rounded-md border border-indigo-100 bg-white px-3 py-2">
             <div className="flex items-center justify-between gap-2">
               <span className="font-semibold text-ink">
                 {index + 1}. {task.agent_name}
@@ -3236,7 +3256,7 @@ function ContextDiagnostics({
     stage === "manual_path"
       ? "bg-rose-100 text-rose-700"
       : stage === "aggressive"
-        ? "bg-orange-100 text-orange-700"
+        ? "bg-amber-100 text-amber-700"
         : stage === "auto_compact"
           ? "bg-amber-100 text-amber-700"
           : stage === "warning"
@@ -3260,7 +3280,7 @@ function ContextDiagnostics({
       </button>
 
       {!collapsed && (
-        <div className="mt-3 space-y-3 rounded-md bg-slate-50 p-3">
+        <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3">
           <div>
             <div className="flex items-center justify-between text-[11px] text-slate-500">
               <span>上下文窗口占用</span>
@@ -3268,7 +3288,7 @@ function ContextDiagnostics({
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
               <div
-                className={`h-full rounded-full ${stage === "normal" ? "bg-emerald-500" : stage === "warning" ? "bg-yellow-500" : "bg-orange-500"}`}
+                className={`h-full rounded-full ${stage === "normal" ? "bg-emerald-500" : stage === "warning" ? "bg-yellow-500" : "bg-amber-500"}`}
                 style={{ width: `${Math.max(2, utilization)}%` }}
               />
             </div>
@@ -3309,7 +3329,7 @@ function ContextDiagnostics({
               <span>工具 Schema：{toolSchemaTokens.toLocaleString()}</span>
             </div>
             {runtimeSaved > 0 && (
-              <div className="mt-1 text-teal-700">轮内工具投影节省约 {runtimeSaved.toLocaleString()} tokens，完整结果仍保存在封存转录。</div>
+              <div className="mt-1 text-indigo-600">轮内工具投影节省约 {runtimeSaved.toLocaleString()} tokens，完整结果仍保存在封存转录。</div>
             )}
           </div>
 
@@ -3318,16 +3338,16 @@ function ContextDiagnostics({
               近期历史：{exactHistory ? "完整原文" : "已裁剪或省略"}
             </span>
             {hasBoundary && <span>更早原文可通过 transcript 工具跨 Boundary 精确回查</span>}
-            {contextDiagnostics.reactive_overflow_retry === true && <span className="text-orange-700">本轮执行过一次溢出恢复</span>}
+            {contextDiagnostics.reactive_overflow_retry === true && <span className="text-amber-700">本轮执行过一次溢出恢复</span>}
           </div>
 
           {(microMessages > 0 || microSaved > 0) && (
-            <div className="flex items-start justify-between gap-4 border-l-2 border-teal-300 pl-3 text-xs leading-5">
+            <div className="flex items-start justify-between gap-4 border-l-2 border-indigo-300 pl-3 text-xs leading-5">
               <div>
                 <div className="font-semibold text-ink">Microcompact 轻量压缩</div>
                 <div className="text-slate-500">清理 {microMessages} 条可重新获取的旧工具结果</div>
               </div>
-              <div className="shrink-0 font-semibold text-teal-700">节省约 {microSaved.toLocaleString()} tokens</div>
+              <div className="shrink-0 font-semibold text-indigo-600">节省约 {microSaved.toLocaleString()} tokens</div>
             </div>
           )}
 
@@ -3408,7 +3428,7 @@ function SkillMcpWorkspace({
       <section aria-label="MCP Server 验证">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
               <Cable className="h-4 w-4 text-accent" />
               MCP Server 验证
             </div>
@@ -3418,7 +3438,7 @@ function SkillMcpWorkspace({
             type="button"
             onClick={onRefresh}
             disabled={loading}
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:bg-teal-50 disabled:opacity-60"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-line bg-white px-2.5 text-xs font-medium text-slate-700 transition hover:bg-indigo-50 disabled:opacity-60"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             重新验证
@@ -3427,7 +3447,7 @@ function SkillMcpWorkspace({
 
         {error && <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{error}</div>}
         {!runtime && !error && (
-          <div className="mt-3 rounded-md border border-dashed border-line bg-white p-4 text-center text-xs text-slate-500">
+          <div className="mt-3 rounded-lg border border-dashed border-line bg-white p-4 text-center text-xs text-slate-500">
             {loading ? "正在启动 stdio 子进程并执行 MCP 握手..." : "等待验证 MCP Server"}
           </div>
         )}
@@ -3436,7 +3456,7 @@ function SkillMcpWorkspace({
             <div className="mt-3 border-y border-line bg-white py-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-ink">{runtime.server_name}</div>
+                  <div className="truncate text-sm font-semibold tracking-tight text-ink">{runtime.server_name}</div>
                   <div className="mt-1 text-xs text-slate-500">Server v{runtime.server_version}</div>
                 </div>
                 <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
@@ -3454,7 +3474,7 @@ function SkillMcpWorkspace({
                 <span className="font-semibold text-ink">tools/list 返回结果</span>
                 <span className="text-slate-500">{runtime.tools.length} 个只读工具</span>
               </div>
-              <div className="mt-2 divide-y divide-line border-y border-line bg-white">
+              <div className="mt-2 divide-y divide-line overflow-hidden rounded-lg border border-line bg-white">
                 {runtime.tools.map((tool) => (
                   <div key={tool.name} className="py-3">
                     <div className="break-all font-mono text-xs font-semibold text-accent">{tool.name}</div>
@@ -3471,7 +3491,7 @@ function SkillMcpWorkspace({
       </section>
 
       <section aria-label="Skill Registry 验证" className="border-t border-line pt-5">
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink">
           <BookOpen className="h-4 w-4 text-accent" />
           Skill Registry 验证
         </div>
@@ -3480,7 +3500,7 @@ function SkillMcpWorkspace({
           id="skill-selector"
           value={selectedSkill?.manifest.name ?? ""}
           onChange={(event) => onSelectSkill(event.target.value)}
-          className="mt-1 h-9 w-full rounded-md border border-line bg-white px-2 text-xs text-slate-700 outline-none focus:border-teal-400"
+          className="mt-1 h-9 w-full rounded-md border border-line bg-white px-2 text-xs text-slate-700 outline-none focus:border-indigo-400"
         >
           {skills.map((item) => <option key={item.manifest.name} value={item.manifest.name}>{item.manifest.title}</option>)}
         </select>
@@ -3489,10 +3509,10 @@ function SkillMcpWorkspace({
           <div className="mt-3 border-y border-line bg-white py-3 text-xs">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-ink">{selectedSkill.manifest.title}</div>
+                <div className="text-sm font-semibold tracking-tight text-ink">{selectedSkill.manifest.title}</div>
                 <div className="mt-1 font-mono text-[11px] text-slate-500">{selectedSkill.manifest.name}</div>
               </div>
-              <span className="rounded-full bg-teal-50 px-2 py-1 font-semibold text-teal-700">v{selectedSkill.manifest.version}</span>
+              <span className="rounded-full bg-indigo-50 px-2 py-1 font-semibold text-indigo-600">v{selectedSkill.manifest.version}</span>
             </div>
             <p className="mt-3 leading-5 text-slate-600">{selectedSkill.manifest.description}</p>
             <dl className="mt-3 grid grid-cols-2 gap-3">
@@ -3501,7 +3521,7 @@ function SkillMcpWorkspace({
             </dl>
             <div className="mt-4 font-semibold text-ink">自动触发条件</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {selectedSkill.manifest.triggers.map((trigger) => <span key={trigger} className="rounded bg-teal-50 px-2 py-1 text-[10px] text-teal-700">{trigger}</span>)}
+              {selectedSkill.manifest.triggers.map((trigger) => <span key={trigger} className="rounded-md bg-indigo-50 px-2 py-1 text-[10px] font-medium text-indigo-600">{trigger}</span>)}
             </div>
             <div className="mt-4 font-semibold text-ink">工作流步骤</div>
             <ol className="mt-2 space-y-2">
@@ -3514,7 +3534,7 @@ function SkillMcpWorkspace({
             </ol>
             <div className="mt-4 font-semibold text-ink">绑定工具</div>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {selectedSkill.manifest.tools.map((tool) => <span key={tool} className="rounded bg-slate-100 px-2 py-1 font-mono text-[10px] text-slate-600">{tool}</span>)}
+              {selectedSkill.manifest.tools.map((tool) => <span key={tool} className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] text-slate-600">{tool}</span>)}
             </div>
           </div>
         )}
@@ -3541,11 +3561,11 @@ function ChatTraceInline({
   const ragPrefetch = traceItems.find((item) => item.kind === "rag_prefetch");
   const statusLabel = responsePending ? "回复中" : runningCount > 0 ? "执行中" : errorCount > 0 ? `${errorCount} 个失败` : "已完成";
   return (
-    <div className="space-y-2 border-l-2 border-teal-100 pl-3">
+    <div className="space-y-2 border-l-2 border-indigo-100 pl-3">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 rounded-md border border-line bg-slate-50 px-3 py-2 text-left text-xs text-slate-600 transition hover:border-teal-200 hover:bg-teal-50"
+        className="flex w-full items-center justify-between gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-left text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50"
       >
         <span className="flex min-w-0 items-center gap-2">
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition ${collapsed ? "-rotate-90" : ""}`} />
@@ -3566,9 +3586,9 @@ function ChatTraceInline({
               item.status === "error"
                 ? "bg-rose-50 text-rose-700"
                 : item.status === "running"
-                  ? "bg-teal-50 text-slate-700"
+                  ? "bg-indigo-50 text-slate-700"
                   : item.kind === "rag_prefetch"
-                    ? "border border-cyan-100 bg-cyan-50 text-slate-700"
+                    ? "border border-sky-100 bg-sky-50 text-slate-700"
                   : "bg-slate-50 text-slate-600"
             }`}
           >
@@ -3577,11 +3597,11 @@ function ChatTraceInline({
               {item.status === "running" && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-accent" />}
             </div>
             {item.skillTitle && (
-              <div className="mb-2 flex flex-wrap items-center gap-1.5 border-y border-teal-100 py-1.5 text-[11px] text-teal-700">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5 border-y border-indigo-100 py-1.5 text-[11px] text-indigo-600">
                 <BookOpen className="h-3.5 w-3.5" />
                 <span className="font-semibold">Skill：{item.skillTitle}</span>
                 {item.skillVersion && <span>v{item.skillVersion}</span>}
-                {item.skillName && <span className="font-mono text-teal-600">{item.skillName}</span>}
+                {item.skillName && <span className="font-mono text-indigo-600">{item.skillName}</span>}
                 {item.skillActivationMode && <span>· {item.skillActivationMode}</span>}
               </div>
             )}
@@ -3654,27 +3674,27 @@ function IssueAnalysisOverlay({
   }, [traceItems]);
 
   return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
-      <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-teal-100 bg-white/95 shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
+    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/40 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
+      <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-white shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
         <div className="border-b border-line px-4 py-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">Thinking Trace</div>
-          <h3 className="mt-1 text-sm font-semibold text-ink">公开分析过程</h3>
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Thinking Trace</div>
+          <h3 className="mt-1 text-sm font-semibold tracking-tight text-ink">公开分析过程</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">展示工具调用、证据收集和面向用户的分析摘要。</p>
         </div>
         <div ref={traceScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
           {traceItems.length === 0 && (
-            <div className="rounded-md border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">
+            <div className="rounded-lg border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">
               点击“重新分析”后，这里会流式显示分析步骤。
             </div>
           )}
           {traceItems.map((item) => (
             <div
               key={item.id}
-              className={`rounded-md border p-3 text-xs leading-5 shadow-sm ${
+              className={`rounded-lg border p-3 text-xs leading-5 shadow-xs ${
                 item.kind === "error"
                   ? "border-rose-200 bg-rose-50 text-rose-700"
                   : item.kind === "thinking"
-                    ? "border-teal-200 bg-teal-50/80 text-slate-700"
+                    ? "border-indigo-200 bg-indigo-50/80 text-slate-700"
                     : "border-line bg-white text-slate-600"
               }`}
             >
@@ -3688,11 +3708,11 @@ function IssueAnalysisOverlay({
         </div>
       </aside>
 
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
+      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-pop xl:order-2">
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">Issue Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />Issue Agent</div>
+            <h3 className="mt-1 line-clamp-2 text-base font-semibold tracking-tight text-ink">
               #{issue.number} {issue.title}
             </h3>
           </div>
@@ -3700,13 +3720,13 @@ function IssueAnalysisOverlay({
             <button
               onClick={onRetry}
               disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
               title="重新分析"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               重新分析
             </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
+            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600" title="关闭">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -3714,18 +3734,18 @@ function IssueAnalysisOverlay({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">Issue Agent 正在检索 Issue、相似历史、代码、文档和会话上下文...</div>
+            <div className="rounded-lg border border-line bg-panel p-4 text-sm text-slate-600">Issue Agent 正在检索 Issue、相似历史、代码、文档和会话上下文...</div>
           )}
 
           {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
               分析失败：{error}
             </div>
           )}
 
           {analysis && (
             <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.conclusion}</span>
                   <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">优先级 {analysis.priority}</span>
@@ -3736,20 +3756,20 @@ function IssueAnalysisOverlay({
                 <p className="mt-3 text-sm leading-6 text-slate-700">{analysis.conclusion_reason || analysis.summary}</p>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">建议负责人</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">建议负责人</h4>
                 <p className="mt-2 text-sm leading-6 text-slate-700">
                   <span className="font-semibold text-ink">{analysis.suggested_owner}</span>
                   <span className="ml-2">{analysis.owner_reason}</span>
                 </p>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">证据</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">证据</h4>
                 <div className="mt-3 space-y-2">
                   {(analysis.evidence ?? []).length === 0 && <div className="text-sm text-slate-500">暂无可用证据。</div>}
                   {(analysis.evidence ?? []).map((item, index) => (
-                    <div key={`${item.source_type}-${item.reference ?? "ref"}-${index}`} className="rounded-md bg-[#fbf7f2] p-3 text-sm leading-6 text-slate-700">
+                    <div key={`${item.source_type}-${item.reference ?? "ref"}-${index}`} className="rounded-lg bg-panel p-3 text-sm leading-6 text-slate-700">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-white px-2 py-0.5 text-[11px] uppercase tracking-[0.08em] text-slate-500">{item.source_type}</span>
                         <span className="font-medium text-ink">{item.title}</span>
@@ -3761,8 +3781,8 @@ function IssueAnalysisOverlay({
                 </div>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">下一步 checklist</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">下一步 checklist</h4>
                 <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
                   {checklist.map((item) => (
                     <li key={item} className="flex gap-2">
@@ -3774,16 +3794,16 @@ function IssueAnalysisOverlay({
               </section>
 
               {hasDrafts && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">可选草稿</h4>
+                <section className="rounded-xl border border-line bg-white p-4">
+                  <h4 className="text-sm font-semibold tracking-tight text-ink">可选草稿</h4>
                   {drafts?.clarification_comment && (
-                    <div className="mt-3 rounded-md bg-panel p-3 text-sm leading-6 text-slate-700">
+                    <div className="mt-3 rounded-lg bg-panel p-3 text-sm leading-6 text-slate-700">
                       <div className="mb-2 text-xs font-semibold text-slate-500">澄清评论</div>
                       <MarkdownMessage content={drafts.clarification_comment} />
                     </div>
                   )}
                   {drafts?.task_breakdown && (
-                    <div className="mt-3 rounded-md bg-panel p-3 text-sm leading-6 text-slate-700">
+                    <div className="mt-3 rounded-lg bg-panel p-3 text-sm leading-6 text-slate-700">
                       <div className="mb-2 text-xs font-semibold text-slate-500">任务拆分说明</div>
                       <MarkdownMessage content={drafts.task_breakdown} />
                     </div>
@@ -3820,24 +3840,24 @@ function AgentTraceAside({
   }, [traceItems]);
 
   return (
-    <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-teal-100 bg-white/95 shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
+    <aside className="order-2 flex max-h-[28vh] min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-white shadow-xl xl:order-1 xl:h-[86vh] xl:max-h-[86vh]">
       <div className="border-b border-line px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">{eyebrow}</div>
-        <h3 className="mt-1 text-sm font-semibold text-ink">{title}</h3>
+        <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />{eyebrow}</div>
+        <h3 className="mt-1 text-sm font-semibold tracking-tight text-ink">{title}</h3>
         <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
       </div>
       <div ref={traceScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
         {traceItems.length === 0 && (
-          <div className="rounded-md border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">{emptyLabel}</div>
+          <div className="rounded-lg border border-dashed border-line bg-panel p-3 text-xs leading-5 text-slate-500">{emptyLabel}</div>
         )}
         {traceItems.map((item) => (
           <div
             key={item.id}
-            className={`rounded-md border p-3 text-xs leading-5 shadow-sm ${
+            className={`rounded-lg border p-3 text-xs leading-5 shadow-xs ${
               item.kind === "error"
                 ? "border-rose-200 bg-rose-50 text-rose-700"
                 : item.kind === "thinking"
-                  ? "border-teal-200 bg-teal-50/80 text-slate-700"
+                  ? "border-indigo-200 bg-indigo-50/80 text-slate-700"
                   : "border-line bg-white text-slate-600"
             }`}
           >
@@ -3871,7 +3891,7 @@ function PRAnalysisOverlay({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
+    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/40 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
       <AgentTraceAside
         eyebrow="Plan & Execute"
         title="PR Review 过程"
@@ -3880,11 +3900,11 @@ function PRAnalysisOverlay({
         traceItems={traceItems}
       />
 
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
+      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-pop xl:order-2">
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">PR Merge Readiness Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />PR Merge Readiness Agent</div>
+            <h3 className="mt-1 line-clamp-2 text-base font-semibold tracking-tight text-ink">
               #{pr.number} {pr.title}
             </h3>
           </div>
@@ -3892,13 +3912,13 @@ function PRAnalysisOverlay({
             <button
               onClick={onRetry}
               disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
               title="重新分析"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               重新分析
             </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
+            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600" title="关闭">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -3906,18 +3926,18 @@ function PRAnalysisOverlay({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">PR Agent 正在制定 Review 计划，并检查 diff、代码、CI、文档和 review comments...</div>
+            <div className="rounded-lg border border-line bg-panel p-4 text-sm text-slate-600">PR Agent 正在制定 Review 计划，并检查 diff、代码、CI、文档和 review comments...</div>
           )}
 
           {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
               分析失败：{error}
             </div>
           )}
 
           {analysis && (
             <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.merge_recommendation}</span>
                   <span className="rounded-full bg-white px-2.5 py-1 text-xs text-slate-600">置信度 {Math.round((analysis.confidence ?? 0) * 100)}%</span>
@@ -3927,16 +3947,16 @@ function PRAnalysisOverlay({
                 <p className="mt-3 text-sm leading-6 text-slate-700">{analysis.recommendation_reason || analysis.summary}</p>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">Review 计划与执行</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">Review 计划与执行</h4>
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <AnalysisBulletList title="计划" items={analysis.plan ?? []} emptyLabel="暂无计划。" />
                   <AnalysisBulletList title="已执行" items={analysis.executed_steps ?? []} emptyLabel="暂无执行记录。" />
                 </div>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">变更与风险</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">变更与风险</h4>
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <AnalysisBulletList title="关键变更" items={analysis.key_changes ?? []} emptyLabel="暂无关键变更摘要。" />
                   <AnalysisBulletList title="风险点" items={analysis.risk_points ?? []} emptyLabel="暂无明显风险点。" tone="warn" />
@@ -3945,8 +3965,8 @@ function PRAnalysisOverlay({
                 </div>
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">合入前动作</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">合入前动作</h4>
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <AnalysisBulletList title="Review checklist" items={analysis.review_checklist ?? []} emptyLabel="暂无 checklist。" />
                   <AnalysisBulletList title="测试建议" items={analysis.test_suggestions ?? []} emptyLabel="暂无测试建议。" />
@@ -3954,8 +3974,8 @@ function PRAnalysisOverlay({
               </section>
 
               {(analysis.review_comments ?? []).length > 0 && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">Review comments 摘要</h4>
+                <section className="rounded-xl border border-line bg-white p-4">
+                  <h4 className="text-sm font-semibold tracking-tight text-ink">Review comments 摘要</h4>
                   <AnalysisBulletList items={analysis.review_comments ?? []} emptyLabel="暂无 review comments。" />
                 </section>
               )}
@@ -3985,7 +4005,7 @@ function CIAnalysisOverlay({
   onClose: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/35 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
+    <div className="absolute inset-0 z-50 grid grid-cols-1 items-center gap-3 bg-slate-950/40 p-4 backdrop-blur-sm xl:grid-cols-[280px_minmax(0,1fr)] xl:p-6">
       <AgentTraceAside
         eyebrow="Plan & Execute"
         title="CI 排查过程"
@@ -3994,23 +4014,23 @@ function CIAnalysisOverlay({
         traceItems={traceItems}
       />
 
-      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-lg border border-line bg-white shadow-2xl xl:order-2">
+      <div role="dialog" aria-modal="true" className="order-1 flex max-h-[86vh] min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-pop xl:order-2">
         <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">CI Root Cause Agent</div>
-            <h3 className="mt-1 line-clamp-2 text-base font-semibold text-ink">{run.name}</h3>
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent"><span className="h-1.5 w-1.5 rounded-full bg-accent" />CI Root Cause Agent</div>
+            <h3 className="mt-1 line-clamp-2 text-base font-semibold tracking-tight text-ink">{run.name}</h3>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <button
               onClick={onRetry}
               disabled={loading}
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:bg-teal-50 disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
               title="重新分析"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               重新分析
             </button>
-            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line bg-white text-slate-500 transition hover:bg-panel" title="关闭">
+            <button onClick={onClose} className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600" title="关闭">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -4018,18 +4038,18 @@ function CIAnalysisOverlay({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {loading && !analysis && (
-            <div className="rounded-md border border-line bg-panel p-4 text-sm text-slate-600">CI Agent 正在制定排查计划，并检查失败 job、错误日志、相关文件和最近 PR...</div>
+            <div className="rounded-lg border border-line bg-panel p-4 text-sm text-slate-600">CI Agent 正在制定排查计划，并检查失败 job、错误日志、相关文件和最近 PR...</div>
           )}
 
           {error && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm leading-6 text-rose-700">
               分析失败：{error}
             </div>
           )}
 
           {analysis && (
             <div className="space-y-4">
-              <section className="rounded-md border border-teal-200 bg-teal-50/60 p-4">
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white">{analysis.failure_type}</span>
                   <span className={`rounded-full px-2.5 py-1 text-xs ${analysis.is_merge_blocking ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>
@@ -4041,8 +4061,8 @@ function CIAnalysisOverlay({
                 {analysis.blocking_reason && <p className="mt-2 text-xs leading-5 text-slate-500">{analysis.blocking_reason}</p>}
               </section>
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">排查计划与执行</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">排查计划与执行</h4>
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <AnalysisBulletList title="计划" items={analysis.plan ?? []} emptyLabel="暂无计划。" />
                   <AnalysisBulletList title="已执行" items={analysis.executed_steps ?? []} emptyLabel="暂无执行记录。" />
@@ -4050,14 +4070,14 @@ function CIAnalysisOverlay({
               </section>
 
               {analysis.first_error && (
-                <section className="rounded-md border border-line bg-white p-4">
-                  <h4 className="text-sm font-semibold text-ink">首个关键错误块</h4>
-                  <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-md border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-900">{analysis.first_error}</pre>
+                <section className="rounded-xl border border-line bg-white p-4">
+                  <h4 className="text-sm font-semibold tracking-tight text-ink">首个关键错误块</h4>
+                  <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-900">{analysis.first_error}</pre>
                 </section>
               )}
 
-              <section className="rounded-md border border-line bg-white p-4">
-                <h4 className="text-sm font-semibold text-ink">根因与修复</h4>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <h4 className="text-sm font-semibold tracking-tight text-ink">根因与修复</h4>
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <AnalysisBulletList title="可能原因" items={analysis.possible_causes ?? []} emptyLabel="暂无可能原因。" tone="warn" />
                   <AnalysisBulletList title="修复步骤" items={analysis.fix_steps ?? []} emptyLabel="暂无修复步骤。" />
@@ -4087,7 +4107,7 @@ function AnalysisBulletList({
   const iconClass = tone === "danger" ? "text-rose-500" : tone === "warn" ? "text-amber-500" : "text-accent";
   const Icon = tone === "default" ? CheckCircle2 : AlertTriangle;
   return (
-    <div className="rounded-md bg-[#fbf7f2] p-3">
+    <div className="rounded-lg bg-panel p-3">
       {title && <div className="text-xs font-semibold text-slate-500">{title}</div>}
       {items.length === 0 ? (
         <div className={`${title ? "mt-2" : ""} text-sm text-slate-500`}>{emptyLabel}</div>
@@ -4148,24 +4168,27 @@ function AddProjectOverlay({
   const canConnect = source === "local" ? Boolean(localPath.trim()) : Boolean(repoUrl.trim());
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-6 backdrop-blur-sm">
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-6 backdrop-blur-sm">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-project-title"
-        className="flex max-h-[calc(100%-24px)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-line bg-[#eef9fb] shadow-2xl"
+        className="flex max-h-[calc(100%-24px)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-pop"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-teal-100 bg-[#eef9fb] px-5 py-4">
+        <div className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-4">
           <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Add Project</div>
-            <h2 id="add-project-title" className="mt-1 text-xl font-semibold text-ink">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-accent">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+              Add Project
+            </div>
+            <h2 id="add-project-title" className="mt-1 text-xl font-semibold tracking-tight text-ink">
               添加项目
             </h2>
           </div>
           <button
             onClick={onClose}
             disabled={loading}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-white text-slate-600 transition hover:bg-teal-50 disabled:opacity-60"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:opacity-50"
             title="关闭"
           >
             <X className="h-4 w-4" />
@@ -4174,14 +4197,14 @@ function AddProjectOverlay({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
-          <section className="rounded-md border border-line bg-white p-4 shadow-sm">
+          <section className="rounded-xl border border-line bg-white p-4 shadow-xs">
             <div className="grid gap-4">
-              <div className="grid grid-cols-2 overflow-hidden rounded-md border border-line bg-slate-50 p-1">
+              <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-line bg-panel p-1">
                 <button
                   type="button"
                   onClick={() => onSourceChange("remote")}
-                  className={`h-9 rounded px-3 text-sm font-medium transition ${
-                    source === "remote" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                  className={`h-9 rounded-md px-3 text-sm font-medium transition ${
+                    source === "remote" ? "bg-white text-ink shadow-xs" : "text-slate-500 hover:text-ink"
                   }`}
                 >
                   GitHub 地址
@@ -4189,8 +4212,8 @@ function AddProjectOverlay({
                 <button
                   type="button"
                   onClick={() => onSourceChange("local")}
-                  className={`h-9 rounded px-3 text-sm font-medium transition ${
-                    source === "local" ? "bg-white text-ink shadow-sm" : "text-slate-600 hover:text-ink"
+                  className={`h-9 rounded-md px-3 text-sm font-medium transition ${
+                    source === "local" ? "bg-white text-ink shadow-xs" : "text-slate-500 hover:text-ink"
                   }`}
                 >
                   本地仓库
@@ -4211,7 +4234,7 @@ function AddProjectOverlay({
                         }
                       }}
                       placeholder="https://github.com/owner/repository 或 owner/repository"
-                      className="mt-2 h-11 w-full rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                      className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                     />
                   </label>
 
@@ -4221,7 +4244,7 @@ function AddProjectOverlay({
                       value={cloneParentDir}
                       onChange={(event) => onCloneParentDirChange(event.target.value)}
                       placeholder="例如 D:\\code\\repos，留空则使用默认缓存目录"
-                      className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                      className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                     />
                   </label>
                 </div>
@@ -4239,9 +4262,9 @@ function AddProjectOverlay({
                         }
                       }}
                       placeholder="例如 D:\\code\\my-repo"
-                      className="h-11 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                      className="h-10 min-w-0 flex-1 rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                     />
-                    <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-line bg-white text-slate-500">
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-line bg-white text-slate-400">
                       <Folder className="h-4 w-4" />
                     </span>
                   </div>
@@ -4254,7 +4277,7 @@ function AddProjectOverlay({
                   <select
                     value={provider}
                     onChange={(event) => onProviderChange(event.target.value)}
-                    className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                    className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                   >
                     <option value="github">GitHub</option>
                     <option value="github_compatible">GitHub-compatible API</option>
@@ -4267,7 +4290,7 @@ function AddProjectOverlay({
                     value={apiBaseUrl}
                     disabled={provider === "github"}
                     onChange={(event) => onApiBaseUrlChange(event.target.value)}
-                    className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 disabled:bg-slate-100 disabled:text-slate-500"
+                    className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-500"
                   />
                 </label>
               </div>
@@ -4279,13 +4302,13 @@ function AddProjectOverlay({
                   value={token}
                   onChange={(event) => onTokenChange(event.target.value)}
                   placeholder="public repo 可留空，私有仓库需要 token"
-                  className="mt-2 h-10 w-full rounded-md border border-line bg-white px-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                  className="mt-2 h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                 />
               </label>
 
               {status && (
                 <div
-                  className={`rounded-md border px-3 py-2 text-sm leading-6 ${
+                  className={`rounded-lg border px-3 py-2 text-sm leading-6 ${
                     status.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-rose-200 bg-rose-50 text-rose-800"
                   }`}
                 >
@@ -4298,14 +4321,14 @@ function AddProjectOverlay({
                 <button
                   onClick={onConnect}
                   disabled={loading || !canConnect}
-                  className="inline-flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-accent px-4 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   {loading ? "连接并同步中..." : "连接并同步"}
                 </button>
                 <button
                   onClick={onClose}
                   disabled={loading}
-                  className="inline-flex h-10 items-center justify-center rounded-md border border-line bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-panel disabled:opacity-60"
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700 disabled:opacity-50"
                 >
                   关闭
                 </button>
@@ -4313,9 +4336,9 @@ function AddProjectOverlay({
             </div>
           </section>
 
-          <section className="rounded-md border border-line bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-semibold text-ink">识别结果</h3>
-            <div className="mt-3 rounded-md bg-[#fbf7f2] p-3 text-sm leading-7 text-slate-600">
+          <section className="rounded-xl border border-line bg-white p-4 shadow-xs">
+            <h3 className="text-sm font-semibold tracking-tight text-ink">识别结果</h3>
+            <div className="mt-3 rounded-lg bg-panel p-3 text-sm leading-7 text-slate-600">
               {source === "remote" ? (
                 <>
                   <div>
@@ -4356,14 +4379,27 @@ function AddProjectOverlay({
   );
 }
 
-function MetricCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: number }) {
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  tone = "default"
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: number;
+  tone?: "default" | "danger";
+}) {
+  const iconTone = tone === "danger" && value > 0 ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
   return (
-    <div className="rounded-md border border-line bg-white px-3 py-2">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-slate-500">{label}</div>
-        <Icon className="h-3.5 w-3.5 text-accent" />
+    <div className="flex items-center gap-2.5 rounded-lg border border-line bg-white px-3 py-2.5 shadow-xs">
+      <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${iconTone}`}>
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-[11px] leading-4 text-slate-500">{label}</div>
+        <div className="mt-0.5 text-lg font-semibold leading-none tracking-tight text-ink">{value}</div>
       </div>
-      <div className="mt-1 text-lg font-semibold text-ink">{value}</div>
     </div>
   );
 }
@@ -4399,7 +4435,7 @@ function WorkspaceControls({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="关键词搜索标题、正文、标签"
-          className="h-10 w-full rounded-md border border-line bg-white pl-9 pr-3 text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+          className="h-9 w-full rounded-lg border border-line bg-white pl-9 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
         />
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -4450,7 +4486,7 @@ function SelectFilter({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 w-full appearance-none rounded-md border border-line bg-white px-2 pr-7 text-xs text-slate-700 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100 disabled:bg-slate-100 disabled:text-slate-400"
+        className="h-9 w-full appearance-none rounded-md border border-line bg-white px-2 pr-7 text-xs text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-400"
       >
         {children}
       </select>
@@ -4478,8 +4514,9 @@ function CategoryGroup({
     <section>
       <button type="button" onClick={onToggle} className="flex h-7 w-full items-center justify-between">
         <div className={`flex items-center gap-2 text-sm font-semibold ${color}`}>
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
           <span>{label}</span>
-          <span className="rounded-full bg-[#f2eee8] px-2 py-0.5 text-xs font-medium text-slate-500">{count}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{count}</span>
         </div>
         <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition ${isCollapsed ? "-rotate-90" : ""}`} />
       </button>
@@ -4498,15 +4535,17 @@ function WorkspaceItemButton({ item }: { item: WorkspaceItem }) {
   return (
     <button
       onClick={item.onClick}
-      className={`w-full rounded-md border bg-white p-3 text-left transition ${
-        item.selected ? "border-teal-400 ring-2 ring-teal-100" : "border-line hover:border-teal-200 hover:bg-teal-50"
+      className={`w-full rounded-lg border bg-white p-3 text-left transition ${
+        item.selected
+          ? "border-indigo-300 bg-indigo-50/40 shadow-xs ring-1 ring-indigo-200"
+          : "border-line hover:border-indigo-200 hover:bg-indigo-50/40"
       }`}
     >
       <div className="line-clamp-2 text-sm font-medium text-ink">{item.title}</div>
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
         <span>{item.meta}</span>
         {item.badges?.slice(0, 3).map((badge) => (
-          <span key={badge} className="rounded-full bg-panel px-2 py-0.5">
+          <span key={badge} className="rounded-full bg-panel px-2 py-0.5 text-slate-500">
             {badge}
           </span>
         ))}
@@ -4546,18 +4585,18 @@ function WorkspaceDetail({
   const updatedAt = issue?.updated_at ?? issue?.created_at ?? pr?.updated_at ?? pr?.created_at ?? run?.updated_at ?? run?.created_at;
 
   return (
-    <div className="mb-4 rounded-md border border-teal-200 bg-white p-4 shadow-sm">
+    <div className="mb-4 rounded-xl border border-indigo-200/80 bg-indigo-50/30 p-4 shadow-xs">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">详情</div>
-          <h3 className="mt-1 text-sm font-semibold leading-6 text-ink">{title}</h3>
+          <h3 className="mt-1 text-sm font-semibold leading-6 tracking-tight text-ink">{title}</h3>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {issue && (
             <button
               onClick={onAnalyzeIssue}
               disabled={!onAnalyzeIssue || analyzingIssue}
-              className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+              className="inline-flex h-7 items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               <ListTodo className="h-3.5 w-3.5" />
               {analyzingIssue ? "分析中..." : "分析当前 Issue"}
@@ -4567,7 +4606,7 @@ function WorkspaceDetail({
             <button
               onClick={onAnalyzePr}
               disabled={!onAnalyzePr || analyzingPr}
-              className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+              className="inline-flex h-7 items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               <GitPullRequest className="h-3.5 w-3.5" />
               {analyzingPr ? "分析中..." : "分析当前 PR"}
@@ -4577,13 +4616,13 @@ function WorkspaceDetail({
             <button
               onClick={onAnalyzeRun}
               disabled={!onAnalyzeRun || analyzingRun}
-              className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+              className="inline-flex h-7 items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
             >
               <AlertTriangle className="h-3.5 w-3.5" />
               {analyzingRun ? "排查中..." : "分析当前 CI"}
             </button>
           )}
-          <button onClick={onClose} className="rounded-md border border-line px-2 py-1 text-xs text-slate-500 transition hover:bg-panel">
+          <button onClick={onClose} className="rounded-lg border border-line px-2 py-1 text-xs text-slate-500 transition hover:bg-panel">
             关闭
           </button>
         </div>
@@ -4596,17 +4635,17 @@ function WorkspaceDetail({
       {(issue?.labels?.length ?? 0) > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {issue?.labels?.map((label) => (
-            <span key={label} className="rounded-full bg-teal-50 px-2 py-0.5 text-xs text-teal-700">
+            <span key={label} className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs text-indigo-600">
               {label}
             </span>
           ))}
         </div>
       )}
-      <div className="mt-3 whitespace-pre-wrap rounded-md bg-[#fbf7f2] p-3 text-xs leading-6 text-slate-700">{body}</div>
+      <div className="mt-3 whitespace-pre-wrap rounded-lg bg-panel p-3 text-xs leading-6 text-slate-700">{body}</div>
       {pr?.files && pr.files.length > 0 && (
         <div className="mt-3 space-y-1.5">
           {pr.files.map((file) => (
-            <div key={file.id} className="rounded-md border border-line bg-white px-2 py-1.5 text-xs text-slate-600">
+            <div key={file.id} className="rounded-lg border border-line bg-white px-2 py-1.5 text-xs text-slate-600">
               <span className="font-medium text-ink">{file.filename}</span>
               <span className="ml-2 text-emerald-600">+{file.additions}</span>
               <span className="ml-1 text-rose-500">-{file.deletions}</span>
@@ -4627,7 +4666,7 @@ function MetaPill({ label, value }: { label: string; value: string }) {
 }
 
 function EmptyWorkspaceState({ label }: { label: string }) {
-  return <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">{label}</div>;
+  return <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">{label}</div>;
 }
 
 function TeamWorkspace({
@@ -4645,13 +4684,13 @@ function TeamWorkspace({
 }) {
   return (
     <div className="space-y-4">
-      <section className="rounded-md border border-line bg-white p-4">
+      <section className="rounded-xl border border-line bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-ink">人员管理</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">人员管理</h3>
             <p className="mt-1 text-xs leading-5 text-slate-500">配置项目工作者，Agent 会在分配 Issue 时参考职位、擅长方向和技术栈。</p>
           </div>
-          <span className="rounded-full bg-panel px-2 py-0.5 text-xs text-slate-500">{members.length} 人</span>
+          <span className="shrink-0 whitespace-nowrap rounded-full bg-panel px-2 py-0.5 text-xs text-slate-500">{members.length} 人</span>
         </div>
 
         <div className="mt-4 grid gap-2">
@@ -4659,42 +4698,42 @@ function TeamWorkspace({
             value={draft.name}
             onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
             placeholder="姓名，例如 Alice"
-            className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <input
             value={draft.role}
             onChange={(event) => onDraftChange({ ...draft, role: event.target.value })}
             placeholder="职位，例如 后端工程师 / 前端工程师 / Tech Lead"
-            className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <textarea
             value={draft.strengths}
             onChange={(event) => onDraftChange({ ...draft, strengths: event.target.value })}
             placeholder="擅长，例如 鉴权、API 设计、CI 排查"
-            className="min-h-16 resize-none rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="min-h-16 resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <input
             value={draft.techStack}
             onChange={(event) => onDraftChange({ ...draft, techStack: event.target.value })}
             placeholder="技术栈，例如 Python, FastAPI, PostgreSQL"
-            className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <button
             onClick={onAddMember}
             disabled={!draft.name.trim()}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             添加成员
           </button>
         </div>
       </section>
 
-      <section className="rounded-md border border-line bg-white p-4">
-        <h3 className="text-sm font-semibold text-ink">团队成员</h3>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <h3 className="text-sm font-semibold tracking-tight text-ink">团队成员</h3>
         <div className="mt-3 space-y-2">
-          {members.length === 0 && <div className="rounded-md bg-panel p-3 text-sm text-slate-500">还没有成员。先添加一个项目工作者。</div>}
+          {members.length === 0 && <div className="rounded-lg bg-panel p-3 text-sm text-slate-500">还没有成员。先添加一个项目工作者。</div>}
           {members.map((member) => (
-            <div key={member.id} className="rounded-md border border-line bg-white p-3">
+            <div key={member.id} className="rounded-lg border border-line bg-white p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium text-ink">{member.name}</div>
@@ -4713,10 +4752,10 @@ function TeamWorkspace({
         </div>
       </section>
 
-      <section className="rounded-md border border-line bg-white p-4 text-sm leading-7 text-slate-600">
+      <section className="rounded-xl border border-line bg-white p-4 text-sm leading-7 text-slate-600">
         <div className="font-medium text-ink">报告管理</div>
         <p className="mt-2">可在中间对话框输入“生成本周研发周报”，或进入周报页面查看 Markdown 预览。</p>
-        <Link href="/reports" className="mt-3 inline-flex rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white">
+        <Link href="/reports" className="mt-3 inline-flex rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover">
           打开周报页
         </Link>
       </section>
@@ -4753,9 +4792,9 @@ function MemoryIndexPromptCard({
 
   return (
     <div className="flex justify-start">
-      <div className="w-full rounded-md border border-teal-100 bg-white px-4 py-4 text-sm shadow-sm">
+      <div className="w-full rounded-md border border-indigo-100 bg-white px-4 py-4 text-sm shadow-xs">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-teal-50 text-accent">
+          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-indigo-50 text-accent">
             {isFailed ? <AlertTriangle className="h-5 w-5" /> : scanning ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Database className="h-5 w-5" />}
           </div>
           <div className="min-w-0 flex-1">
@@ -4777,19 +4816,19 @@ function MemoryIndexPromptCard({
                 </div>
               </div>
             )}
-            {error && !isFailed && <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div>}
+            {error && !isFailed && <div className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div>}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <button
                 onClick={onSnooze}
                 disabled={scanning}
-                className="rounded-md border border-line bg-white px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-panel disabled:opacity-60"
+                className="rounded-lg border border-line bg-white px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-panel disabled:opacity-60"
               >
                 稍后再说
               </button>
               <button
                 onClick={onStartScan}
                 disabled={scanning}
-                className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-2 text-xs font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${scanning ? "animate-spin" : ""}`} />
                 {actionLabel}
@@ -4946,7 +4985,7 @@ function MemoryHubWorkspace({
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 overflow-x-auto rounded-md border border-line bg-white p-1">
+      <div className="flex gap-1 overflow-x-auto rounded-lg border border-line bg-panel p-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -4961,31 +5000,31 @@ function MemoryHubWorkspace({
         ))}
       </div>
 
-      {error && <div className="rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
       {activeTab === "recall" && (
         <section className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-ink">召回记录</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">召回记录</h3>
             <button type="button" onClick={loadRecallEvents} className="rounded-md border border-line px-2 py-1 text-xs text-slate-600 hover:bg-panel">
               刷新
             </button>
           </div>
-          {loadingPanel === "recall" && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">正在读取召回记录...</div>}
-          {!loadingPanel && recallEvents.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有召回记录。智能体调用 search_evidence 或 RAG 搜索后会显示在这里。</div>}
+          {loadingPanel === "recall" && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">正在读取召回记录...</div>}
+          {!loadingPanel && recallEvents.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有召回记录。智能体调用 search_evidence 或 RAG 搜索后会显示在这里。</div>}
           {recallEvents.map((event) => (
-            <div key={event.id} className="rounded-md border border-line bg-white p-3">
+            <div key={event.id} className="rounded-lg border border-line bg-white p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-accent">{event.tool_name}</div>
-                  <div className="mt-1 line-clamp-2 text-sm font-semibold text-ink">{event.query || "空查询"}</div>
+                  <div className="mt-1 line-clamp-2 text-sm font-semibold tracking-tight text-ink">{event.query || "空查询"}</div>
                   <div className="mt-1 text-xs text-slate-500">{event.result_count} 个结果 · {event.mode} · {formatDateTime(event.created_at)}</div>
                 </div>
-                <span className="rounded-md bg-panel px-2 py-1 text-[11px] text-slate-600">{event.scope}</span>
+                <span className="rounded-lg bg-panel px-2 py-1 text-[11px] text-slate-600">{event.scope}</span>
               </div>
               <div className="mt-2 space-y-1">
                 {(event.results ?? []).slice(0, 3).map((item, index) => (
-                  <div key={`${event.id}-${index}`} className="rounded-md bg-panel px-3 py-2 text-xs text-slate-600">
+                  <div key={`${event.id}-${index}`} className="rounded-lg bg-panel px-3 py-2 text-xs text-slate-600">
                     <span className="font-medium text-ink">{String(item.source_type || "source")}</span>
                     <span className="mx-1">·</span>
                     {String(item.title || "")}
@@ -4999,8 +5038,8 @@ function MemoryHubWorkspace({
 
       {activeTab === "search" && (
         <section className="space-y-4">
-          <div className="rounded-md border border-line bg-white p-4">
-            <h3 className="text-sm font-semibold text-ink">统一记忆搜索</h3>
+          <div className="rounded-xl border border-line bg-white p-4">
+            <h3 className="text-sm font-semibold tracking-tight text-ink">统一记忆搜索</h3>
             <div className="mt-3 flex gap-2">
               <input
                 value={searchQuery}
@@ -5009,63 +5048,63 @@ function MemoryHubWorkspace({
                   if (event.key === "Enter") void runMemorySearch();
                 }}
                 placeholder="搜索 Issue、PR、CI、文档、会话记忆..."
-                className="h-9 min-w-0 flex-1 rounded-md border border-line px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="h-9 min-w-0 flex-1 rounded-md border border-line px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
               <button
                 type="button"
                 onClick={runMemorySearch}
                 disabled={!searchQuery.trim() || loadingPanel === "search"}
-                className="inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 搜索
               </button>
             </div>
             <div className="mt-3 space-y-2">
               {searchResults.map((item) => (
-                <div key={`${item.source_type}-${item.source_id}-${item.title}`} className="rounded-md bg-panel p-3">
+                <div key={`${item.source_type}-${item.source_id}-${item.title}`} className="rounded-lg bg-panel p-3">
                   <div className="text-xs font-medium text-accent">{knowledgeTypeLabel(item.source_type)}</div>
-                  <div className="mt-1 text-sm font-semibold text-ink">{item.title}</div>
+                  <div className="mt-1 text-sm font-semibold tracking-tight text-ink">{item.title}</div>
                   <div className="mt-1 line-clamp-3 text-xs leading-5 text-slate-600">{item.snippet}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          <section className="rounded-md border border-line bg-white p-4">
-            <h3 className="text-sm font-semibold text-ink">项目记忆</h3>
+          <section className="rounded-xl border border-line bg-white p-4">
+            <h3 className="text-sm font-semibold tracking-tight text-ink">项目记忆</h3>
             <p className="mt-1 text-xs leading-5 text-slate-500">记录项目约定、架构背景和长期偏好，会写入当前项目的 RAG 文档。</p>
             <div className="mt-4 grid gap-2">
               <input
                 value={draft.title}
                 onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
                 placeholder="标题，例如 认证模块约定"
-                className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
               <textarea
                 value={draft.content}
                 onChange={(event) => onDraftChange({ ...draft, content: event.target.value })}
                 placeholder="记忆内容，例如 登录相关 Issue 优先分给熟悉 JWT 和 FastAPI 的成员"
-                className="min-h-24 resize-none rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                className="min-h-24 resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
               <button
                 onClick={onAddNote}
                 disabled={!draft.title.trim() && !draft.content.trim()}
-                className="inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 保存记忆
               </button>
             </div>
           </section>
 
-          <section className="rounded-md border border-line bg-white p-4">
+          <section className="rounded-xl border border-line bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold text-ink">知识库文件</h3>
+                <h3 className="text-sm font-semibold tracking-tight text-ink">知识库文件</h3>
                 <p className="mt-1 text-xs leading-5 text-slate-500">上传文档后会切片写入向量索引，并参与统一记忆搜索。</p>
               </div>
               <FileText className="h-4 w-4 text-accent" />
             </div>
-            <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-teal-200 bg-teal-50/50 px-3 py-4 text-center transition hover:bg-teal-50">
+            <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 px-3 py-4 text-center transition hover:bg-indigo-50">
               <Upload className="h-5 w-5 text-accent" />
               <span className="mt-2 text-sm font-medium text-ink">{uploading ? "上传并索引中..." : "上传文件到知识库"}</span>
               <span className="mt-1 text-xs text-slate-500">支持文本、Markdown、JSON、CSV、PDF、DOCX 等可抽取文本的文件</span>
@@ -5081,7 +5120,7 @@ function MemoryHubWorkspace({
               />
             </label>
             <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
-              <div className="rounded-md bg-panel px-3 py-2">知识条目：{visibleKnowledgeItems.length}</div>
+              <div className="rounded-lg bg-panel px-3 py-2">知识条目：{visibleKnowledgeItems.length}</div>
             </div>
           </section>
 
@@ -5092,7 +5131,7 @@ function MemoryHubWorkspace({
       {activeTab === "status" && (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-ink">索引与健康状态</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">索引与健康状态</h3>
             <button type="button" onClick={loadMemoryStatus} className="rounded-md border border-line px-2 py-1 text-xs text-slate-600 hover:bg-panel">
               刷新
             </button>
@@ -5105,7 +5144,7 @@ function MemoryHubWorkspace({
             <MemoryStatusTile label="待确认" value={`${numberFromUnknown(memoryStatus?.candidates?.pending)} 条`} />
             <MemoryStatusTile label="向量后端" value={vectorBackend} />
           </div>
-          <div className="rounded-md border border-line bg-white p-3 text-xs leading-5 text-slate-600">
+          <div className="rounded-lg border border-line bg-white p-3 text-xs leading-5 text-slate-600">
             <div>最后扫描：{String(memoryStatus?.index?.last_scan_at ?? "暂无")}</div>
             <div>Embedding Provider：{String(vectorEmbedding.provider ?? "未配置")}</div>
             <div>Embedding：{String(vectorEmbedding.model ?? "未配置")}</div>
@@ -5119,23 +5158,23 @@ function MemoryHubWorkspace({
       {activeTab === "review" && (
         <section className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-ink">待确认知识</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">待确认知识</h3>
             <button type="button" onClick={() => loadCandidates()} className="rounded-md border border-line px-2 py-1 text-xs text-slate-600 hover:bg-panel">
               刷新
             </button>
           </div>
-          {candidates.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有待确认知识。新的会话总结会在这里沉淀为候选项。</div>}
+          {candidates.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有待确认知识。新的会话总结会在这里沉淀为候选项。</div>}
           {candidates.map((candidate) => (
-            <div key={candidate.id} className="rounded-md border border-line bg-white p-3">
+            <div key={candidate.id} className="rounded-lg border border-line bg-white p-3">
               <div className="text-xs font-medium text-accent">{memoryCandidateKindLabel(candidate.kind)}</div>
-              <div className="mt-1 text-sm font-semibold text-ink">{candidate.title}</div>
+              <div className="mt-1 text-sm font-semibold tracking-tight text-ink">{candidate.title}</div>
               <div className="mt-2 whitespace-pre-wrap text-xs leading-5 text-slate-600">{candidate.content}</div>
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
                   disabled={loadingPanel === candidate.id}
                   onClick={() => approveCandidate(candidate.id)}
-                  className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 disabled:opacity-60"
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   确认入库
                 </button>
@@ -5143,7 +5182,7 @@ function MemoryHubWorkspace({
                   type="button"
                   disabled={loadingPanel === candidate.id}
                   onClick={() => rejectCandidate(candidate.id)}
-                  className="rounded-md border border-line px-3 py-1.5 text-xs text-slate-600 hover:bg-panel disabled:opacity-60"
+                  className="rounded-lg border border-line px-3 py-1.5 text-xs text-slate-600 hover:bg-panel disabled:opacity-50"
                 >
                   拒绝
                 </button>
@@ -5158,7 +5197,7 @@ function MemoryHubWorkspace({
 
 function MemoryStatusTile({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-md border border-line bg-white px-3 py-2">
+    <div className="rounded-lg border border-line bg-white px-3 py-2">
       <div className="text-[11px] text-slate-500">{label}</div>
       <div className="mt-1 font-semibold text-ink">{value}</div>
     </div>
@@ -5179,9 +5218,9 @@ function MemoryItemLists({
   return (
     <>
       <section className="space-y-2">
-        {notes.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有项目记忆。</div>}
+        {notes.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有项目记忆。</div>}
         {notes.map((note) => (
-          <div key={note.id} className="rounded-md border border-line bg-white p-3">
+          <div key={note.id} className="rounded-lg border border-line bg-white p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="font-medium text-ink">{note.title}</div>
               <button onClick={() => onRemoveNote(note.id)} className="rounded-md border border-line px-2 py-1 text-xs text-slate-500 hover:bg-panel">
@@ -5194,9 +5233,9 @@ function MemoryItemLists({
       </section>
 
       <section className="space-y-2">
-        {knowledgeItems.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有上传文件或生成周报。</div>}
+        {knowledgeItems.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有上传文件或生成周报。</div>}
         {knowledgeItems.map((item) => (
-          <div key={`${item.source_type}-${item.id}`} className="rounded-md border border-line bg-white p-3">
+          <div key={`${item.source_type}-${item.id}`} className="rounded-lg border border-line bg-white p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="line-clamp-1 font-medium text-ink">{item.title}</div>
@@ -5269,41 +5308,41 @@ function MemoryWorkspace({
 
   return (
     <div className="space-y-4">
-      <section className="rounded-md border border-line bg-white p-4">
-        <h3 className="text-sm font-semibold text-ink">项目记忆</h3>
+      <section className="rounded-xl border border-line bg-white p-4">
+        <h3 className="text-sm font-semibold tracking-tight text-ink">项目记忆</h3>
         <p className="mt-1 text-xs leading-5 text-slate-500">记录项目约定、架构背景和长期偏好，会写入当前项目独立的 RAG 文档。</p>
         <div className="mt-4 grid gap-2">
           <input
             value={draft.title}
             onChange={(event) => onDraftChange({ ...draft, title: event.target.value })}
             placeholder="标题，例如 认证模块约定"
-            className="h-9 rounded-md border border-line bg-white px-3 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <textarea
             value={draft.content}
             onChange={(event) => onDraftChange({ ...draft, content: event.target.value })}
             placeholder="记忆内容，例如 登录相关 Issue 优先分给熟悉 JWT 和 FastAPI 的成员"
-            className="min-h-24 resize-none rounded-md border border-line bg-white px-3 py-2 text-sm outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+            className="min-h-24 resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
           />
           <button
             onClick={onAddNote}
             disabled={!draft.title.trim() && !draft.content.trim()}
-            className="inline-flex h-9 items-center justify-center rounded-md bg-accent px-3 text-sm font-medium text-white transition hover:bg-teal-700 disabled:opacity-60"
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             保存记忆
           </button>
         </div>
       </section>
 
-      <section className="rounded-md border border-line bg-white p-4">
+      <section className="rounded-xl border border-line bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-ink">知识库文件</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-ink">知识库文件</h3>
             <p className="mt-1 text-xs leading-5 text-slate-500">上传文档后会切片写入 Milvus，只在当前项目内检索。</p>
           </div>
           <FileText className="h-4 w-4 text-accent" />
         </div>
-        <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-teal-200 bg-teal-50/50 px-3 py-4 text-center transition hover:bg-teal-50">
+        <label className="mt-4 flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-indigo-200 bg-indigo-50/40 px-3 py-4 text-center transition hover:bg-indigo-50">
           <Upload className="h-5 w-5 text-accent" />
           <span className="mt-2 text-sm font-medium text-ink">{uploading ? "上传并索引中..." : "上传文件到知识库"}</span>
           <span className="mt-1 text-xs text-slate-500">支持文本、Markdown、JSON、CSV、PDF、DOCX 等可抽取文本的文件</span>
@@ -5319,14 +5358,14 @@ function MemoryWorkspace({
           />
         </label>
         <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600">
-          <div className="rounded-md bg-panel px-3 py-2">知识条目：{visibleKnowledgeItems.length}</div>
+          <div className="rounded-lg bg-panel px-3 py-2">知识条目：{visibleKnowledgeItems.length}</div>
         </div>
       </section>
 
       <section className="space-y-2">
-        {notes.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有项目记忆。</div>}
+        {notes.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有项目记忆。</div>}
         {notes.map((note) => (
-          <div key={note.id} className="rounded-md border border-line bg-white p-3">
+          <div key={note.id} className="rounded-lg border border-line bg-white p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="font-medium text-ink">{note.title}</div>
               <button onClick={() => onRemoveNote(note.id)} className="rounded-md border border-line px-2 py-1 text-xs text-slate-500 hover:bg-panel">
@@ -5339,9 +5378,9 @@ function MemoryWorkspace({
       </section>
 
       <section className="space-y-2">
-        {visibleKnowledgeItems.length === 0 && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有上传文件或生成周报。</div>}
+        {visibleKnowledgeItems.length === 0 && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有上传文件或生成周报。</div>}
         {visibleKnowledgeItems.map((item) => (
-          <div key={`${item.source_type}-${item.id}`} className="rounded-md border border-line bg-white p-3">
+          <div key={`${item.source_type}-${item.id}`} className="rounded-lg border border-line bg-white p-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="line-clamp-1 font-medium text-ink">{item.title}</div>
@@ -5421,12 +5460,12 @@ function KnowledgeGraphWorkspace({
 
   return (
     <div className="space-y-3">
-      <section className="rounded-md border border-line bg-white p-4">
+      <section className="rounded-xl border border-line bg-white p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <Network className="h-4 w-4 text-accent" />
-              <h3 className="text-sm font-semibold text-ink">项目知识图谱</h3>
+              <h3 className="text-sm font-semibold tracking-tight text-ink">项目知识图谱</h3>
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-500">把 Issue、PR、CI、成员、文档、记忆和代码文件按可追溯关系串起来。</p>
           </div>
@@ -5436,7 +5475,7 @@ function KnowledgeGraphWorkspace({
               onClick={onRefresh}
               disabled={loading}
               title="刷新图谱"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line text-slate-500 transition hover:bg-panel disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </button>
@@ -5445,7 +5484,7 @@ function KnowledgeGraphWorkspace({
               onClick={onRebuild}
               disabled={loading}
               title="重建关系边"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-line text-slate-500 transition hover:bg-panel disabled:opacity-50"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:opacity-50"
             >
               <Database className="h-3.5 w-3.5" />
             </button>
@@ -5453,12 +5492,12 @@ function KnowledgeGraphWorkspace({
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-          <div className="rounded-md bg-panel px-3 py-2">节点 {visibleNodeCount}</div>
-          <div className="rounded-md bg-panel px-3 py-2">关系 {visibleEdgeCount}</div>
-          <div className="rounded-md bg-panel px-3 py-2">总边 {totalEdgeCount}</div>
+          <div className="rounded-lg bg-panel px-3 py-2">节点 {visibleNodeCount}</div>
+          <div className="rounded-lg bg-panel px-3 py-2">关系 {visibleEdgeCount}</div>
+          <div className="rounded-lg bg-panel px-3 py-2">总边 {totalEdgeCount}</div>
         </div>
 
-        <div className="mt-3 flex items-center gap-2 rounded-md border border-line bg-white px-3">
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-line bg-white px-3">
           <Search className="h-4 w-4 shrink-0 text-slate-400" />
           <input
             value={query}
@@ -5508,20 +5547,20 @@ function KnowledgeGraphWorkspace({
         )}
       </section>
 
-      {error && <div className="rounded-md border border-red-100 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+      {error && <div className="rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
       {!error && !loading && (!graph || graph.nodes.length === 0) && (
-        <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">还没有可展示的项目关系。同步 Issue/PR/CI，或添加项目记忆后再重建图谱。</div>
+        <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有可展示的项目关系。同步 Issue/PR/CI，或添加项目记忆后再重建图谱。</div>
       )}
 
-      {loading && !graph && <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">正在加载项目知识图谱...</div>}
+      {loading && !graph && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">正在加载项目知识图谱...</div>}
 
       {graph && filtered.nodes.length === 0 && (
-        <div className="rounded-md border border-line bg-white p-4 text-sm text-slate-500">当前搜索或过滤条件下没有匹配节点。</div>
+        <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">当前搜索或过滤条件下没有匹配节点。</div>
       )}
 
       {graph && filtered.nodes.length > 0 && (
-        <section className="rounded-md border border-line bg-white p-3">
+        <section className="rounded-lg border border-line bg-white p-3">
           <div className="overflow-x-auto rounded-md bg-panel">
             <svg viewBox="0 0 720 420" className="h-[360px] min-w-[680px] w-full" role="img" aria-label="项目知识图谱">
               {filtered.edges.map((edge) => {
@@ -5551,8 +5590,8 @@ function KnowledgeGraphWorkspace({
                       cx={pos.x}
                       cy={pos.y}
                       r={selected ? 19 : 15}
-                      fill={node.highlighted ? "#fff7ed" : style.fill}
-                      stroke={node.highlighted ? "#f97316" : selected ? "#111827" : style.stroke}
+                      fill={node.highlighted ? "#fffbeb" : style.fill}
+                      stroke={node.highlighted ? "#d97706" : selected ? "#0f172a" : style.stroke}
                       strokeWidth={node.highlighted || selected ? 2.6 : 1.6}
                     />
                     <text x={pos.x} y={pos.y + 34} textAnchor="middle" fontSize="11" fontWeight={selected ? "700" : "600"} fill="#334155">
@@ -5568,25 +5607,25 @@ function KnowledgeGraphWorkspace({
           </div>
 
           {selectedNode && (
-            <div className="mt-3 rounded-md border border-line bg-white p-3">
+            <div className="mt-3 rounded-lg border border-line bg-white p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-accent">{graphNodeTypeLabel(selectedNode.type)}</div>
-                  <div className="mt-1 line-clamp-2 text-sm font-semibold text-ink">{selectedNode.title}</div>
+                  <div className="mt-1 line-clamp-2 text-sm font-semibold tracking-tight text-ink">{selectedNode.title}</div>
                   {selectedNode.subtitle && <div className="mt-1 text-xs text-slate-500">{selectedNode.subtitle}</div>}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <button
                     type="button"
                     onClick={() => onFocusNode(selectedNode)}
-                    className="rounded-md border border-line px-2 py-1 text-xs text-slate-600 transition hover:bg-panel"
+                    className="rounded-lg border border-line px-2 py-1 text-xs text-slate-600 transition hover:bg-panel"
                   >
                     聚焦
                   </button>
                   <button
                     type="button"
                     onClick={() => onOpenNode(selectedNode)}
-                    className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-teal-700"
+                    className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover"
                   >
                     打开
                   </button>
@@ -5599,7 +5638,7 @@ function KnowledgeGraphWorkspace({
                   const isOutgoing = edge.from_type === selectedNode.type && edge.from_id === selectedNode.id;
                   const other = nodeByKey.get(isOutgoing ? `${edge.to_type}:${edge.to_id}` : `${edge.from_type}:${edge.from_id}`);
                   return (
-                    <div key={edge.id} className="rounded-md bg-panel px-3 py-2 text-xs text-slate-600">
+                    <div key={edge.id} className="rounded-lg bg-panel px-3 py-2 text-xs text-slate-600">
                       <span className="font-medium text-ink">{isOutgoing ? "→" : "←"} {graphRelationLabel(edge.relation)}</span>
                       <span className="ml-2">{other?.title ?? edge.to_id}</span>
                     </div>
@@ -5794,29 +5833,29 @@ function graphRelationLabel(relation: string) {
 function graphNodeStyle(type: string) {
   const styles: Record<string, { fill: string; stroke: string }> = {
     issue: { fill: "#fef3c7", stroke: "#d97706" },
-    pull_request: { fill: "#ccfbf1", stroke: "#0f766e" },
-    ci_run: { fill: "#fee2e2", stroke: "#dc2626" },
+    pull_request: { fill: "#e0e7ff", stroke: "#4f46e5" },
+    ci_run: { fill: "#fee2e2", stroke: "#e11d48" },
     team_member: { fill: "#e0e7ff", stroke: "#4f46e5" },
-    memory_note: { fill: "#fce7f3", stroke: "#be185d" },
-    document: { fill: "#dbeafe", stroke: "#2563eb" },
-    code_file: { fill: "#dcfce7", stroke: "#16a34a" },
-    session_decision: { fill: "#f3e8ff", stroke: "#9333ea" }
+    memory_note: { fill: "#ffe4e6", stroke: "#be123c" },
+    document: { fill: "#e0f2fe", stroke: "#0284c7" },
+    code_file: { fill: "#d1fae5", stroke: "#059669" },
+    session_decision: { fill: "#f5f3ff", stroke: "#7c3aed" }
   };
   return styles[type] ?? { fill: "#f1f5f9", stroke: "#64748b" };
 }
 
 function graphRelationColor(relation: string) {
   const colors: Record<string, string> = {
-    resolves: "#16a34a",
+    resolves: "#059669",
     mentions: "#64748b",
     assigned_to: "#4f46e5",
-    blocked_by: "#dc2626",
+    blocked_by: "#e11d48",
     failed_in_ci: "#ef4444",
-    touches_file: "#0f766e",
-    documents: "#2563eb",
-    cites: "#be185d",
-    produced_from_session: "#9333ea",
-    used_as_evidence: "#f97316"
+    touches_file: "#4f46e5",
+    documents: "#0284c7",
+    cites: "#be123c",
+    produced_from_session: "#7c3aed",
+    used_as_evidence: "#d97706"
   };
   return colors[relation] ?? "#64748b";
 }

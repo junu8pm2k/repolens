@@ -423,13 +423,13 @@ export default function EvalsPage() {
       />
 
       <section className="grid gap-4 lg:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="rounded-md border border-line bg-white p-5">
-          <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <Gauge className="h-4 w-4 text-teal-700" />评测配置
+        <div className="rounded-xl border border-line bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-ink">
+            <Gauge className="h-4 w-4 text-accent" />评测配置
           </div>
           <label className="mt-4 block text-sm font-medium text-slate-700">
             仓库知识上下文
-            <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" value={repoId} onChange={(event) => setRepoId(event.target.value)}>
+            <select className="mt-2 h-9 w-full rounded-md border border-line bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" value={repoId} onChange={(event) => setRepoId(event.target.value)}>
               <option value="">请选择仓库</option>
               {repos.map((repo) => <option key={repo.id} value={repo.id}>{repo.full_name}</option>)}
             </select>
@@ -437,7 +437,7 @@ export default function EvalsPage() {
 
           <label className="mt-4 block text-sm font-medium text-slate-700">
             评测集
-            <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100" value={suiteId} onChange={(event) => setSuiteId(event.target.value)}>
+            <select className="mt-2 h-9 w-full rounded-md border border-line bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" value={suiteId} onChange={(event) => setSuiteId(event.target.value)}>
               <option value="">请选择评测集</option>
               {suites.map((suite) => (
                 <option key={suite.id} value={suite.id}>
@@ -448,17 +448,17 @@ export default function EvalsPage() {
           </label>
 
           {selectedSuite && (
-            <div className={`mt-3 rounded-md border p-3 text-xs leading-5 ${selectedSuite.source === "fixed" ? "border-teal-100 bg-teal-50 text-teal-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+            <div className={`mt-3 rounded-lg border p-3 text-xs leading-5 ${selectedSuite.source === "fixed" ? "border-accent-line bg-accent-soft text-indigo-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
               <div className="font-semibold">{selectedSuite.source === "fixed" ? "固定回归评测集" : "仅用于冒烟测试"}</div>
               <p className="mt-1">{selectedSuite.description}</p>
-              <div className="mt-2 text-[11px] opacity-80">
+              <div className={`mt-2 text-[11px] ${selectedSuite.source === "fixed" ? "text-indigo-500" : "text-amber-700"}`}>
                 {selectedSuite.case_count ? `${selectedSuite.case_count} 条 Case` : "运行时自动生成"}
                 {selectedSuite.sha256 ? ` · Hash ${selectedSuite.sha256.slice(0, 12)}` : ""}
               </div>
               {!selectedSuite.ready && (
                 <p className="mt-2 text-rose-700">
                   缺少来源：{selectedSuite.missing_sources.join("、")}。请先在{" "}
-                  <Link href={`/knowledge/${repoId}`} className="font-semibold underline">项目知识</Link>{" "}
+                  <Link href={`/knowledge/${repoId}`} className="font-semibold underline underline-offset-2">项目知识</Link>{" "}
                   上传并完成索引。
                 </p>
               )}
@@ -467,14 +467,14 @@ export default function EvalsPage() {
 
           <label className="mt-4 block text-sm font-medium text-slate-700">
             Top-K
-            <select className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2" value={topK} onChange={(event) => setTopK(Number(event.target.value))}>
+            <select className="mt-2 h-9 w-full rounded-md border border-line bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" value={topK} onChange={(event) => setTopK(Number(event.target.value))}>
               {[2, 3, 4, 5, 8, 10].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </label>
 
-          <div className="mt-5 space-y-2 text-sm text-slate-600">
+          <div className="mt-5 space-y-2 border-t border-line pt-4 text-sm text-slate-600">
             {["真实 ChatAgent 与生产工具集", "隔离评测会话，不污染聊天记录", "逐题证据、硬规则和工具轨迹", "固定评测集版本与阈值持久化"].map((label) => (
-              <div key={label} className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-teal-600" />{label}</div>
+              <div key={label} className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0 text-indigo-600" />{label}</div>
             ))}
           </div>
 
@@ -484,10 +484,10 @@ export default function EvalsPage() {
           </PrimaryButton>
         </div>
 
-        <div className="min-w-0 rounded-md border border-line bg-white p-5">
+        <div className="flex min-w-0 flex-col rounded-xl border border-line bg-white p-5 shadow-xs">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line pb-4">
             <div>
-              <div className="text-sm font-semibold text-ink">本次评测结果</div>
+              <div className="text-base font-semibold tracking-tight text-ink">本次评测结果</div>
               <div className="mt-1 text-xs text-slate-500">
                 {result
                   ? `Eval ${result.eval_id.slice(0, 8)} · ${result.result.evaluation_set?.label || "未记录评测集"} · Top-K ${result.result.pipeline?.top_k || "-"}`
@@ -497,10 +497,10 @@ export default function EvalsPage() {
             {result && <StatusGroup result={result.result} active={active} />}
           </div>
 
-          {error && <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm leading-6 text-rose-800">{error}</div>}
+          {error && <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm leading-6 text-rose-700">{error}</div>}
           {notice && (
-            <div className="mt-4 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm leading-6 text-sky-800">
-              {notice}{draftId && <> · <Link href="/action-drafts" className="font-semibold underline">打开安全草稿</Link></>}
+            <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm leading-6 text-sky-800">
+              {notice}{draftId && <> · <Link href="/action-drafts" className="font-semibold underline underline-offset-2">打开安全草稿</Link></>}
             </div>
           )}
 
@@ -509,17 +509,17 @@ export default function EvalsPage() {
           ) : result ? (
             <>
               {result.result.ragas?.error && (
-                <div className="mt-4 flex gap-2 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+                <div className="mt-4 flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div><div className="font-semibold">评测不完整：{result.result.ragas.case_errors || 0} 条用例包含 Judge 错误</div><div className="mt-1 text-xs">{result.result.ragas.error}</div></div>
+                  <div><div className="font-semibold">评测不完整：{result.result.ragas.case_errors || 0} 条用例包含 Judge 错误</div><div className="mt-1 text-xs leading-5">{result.result.ragas.error}</div></div>
                 </div>
               )}
 
               <div className="mt-4 flex flex-wrap gap-2">
-                <button onClick={rescoreEval} disabled={!rescoreAvailable || loading} className="inline-flex items-center gap-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-800 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-40">
+                <button onClick={rescoreEval} disabled={!rescoreAvailable || loading} className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-accent-line hover:bg-accent-soft/60 hover:text-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-40">
                   <RefreshCcw className="h-4 w-4" />仅重试异常评分
                 </button>
-                <button onClick={createIssueDraft} disabled={loading} className="inline-flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800 transition hover:bg-amber-100 disabled:opacity-40">
+                <button onClick={createIssueDraft} disabled={loading} className="inline-flex h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-200 disabled:cursor-not-allowed disabled:opacity-40">
                   <FileWarning className="h-4 w-4" />生成修复 Issue 草稿
                 </button>
               </div>
@@ -547,22 +547,22 @@ export default function EvalsPage() {
 
               <DiagnosticOverview result={result.result} />
             </>
-          ) : <div className="flex min-h-72 items-center justify-center text-sm text-slate-500">等待运行评测</div>}
+          ) : <EmptyResult />}
         </div>
       </section>
 
       {result && !active && cases.length > 0 && <CaseDiagnostics cases={cases} />}
 
       {result && !active && (
-        <section className="mt-4 rounded-md border border-line bg-white p-5">
-          <div className="flex items-center gap-2 font-semibold text-ink"><GitCompareArrows className="h-4 w-4 text-teal-700" />回归对比</div>
-          <p className="mt-2 text-sm text-slate-600">选择一次历史运行作为基线。评测集 Hash、Judge、Ragas 和 Top-K 不一致时，系统会明确拒绝把结果当作严格对照。</p>
+        <section className="mt-4 rounded-xl border border-line bg-white p-5 shadow-xs">
+          <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-ink"><GitCompareArrows className="h-4 w-4 text-accent" />回归对比</div>
+          <p className="mt-2 text-sm leading-6 text-slate-600">选择一次历史运行作为基线。评测集 Hash、Judge、Ragas 和 Top-K 不一致时，系统会明确拒绝把结果当作严格对照。</p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <select className="min-w-0 flex-1 rounded-md border border-line bg-white px-3 py-2 text-sm" value={baselineId} onChange={(event) => { setBaselineId(event.target.value); setComparison(null); }}>
+            <select className="h-9 min-w-0 flex-1 rounded-md border border-line bg-white px-3 text-sm text-slate-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" value={baselineId} onChange={(event) => { setBaselineId(event.target.value); setComparison(null); }}>
               <option value="">请选择基线运行</option>
               {baselineOptions.map((item) => <option key={item.eval_id} value={item.eval_id}>{item.name} · {item.created_at ? new Date(item.created_at).toLocaleString("zh-CN") : "-"}</option>)}
             </select>
-            <button onClick={compareRuns} disabled={!baselineId || comparing} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">
+            <button onClick={compareRuns} disabled={!baselineId || comparing} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-200 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40">
               {comparing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <GitCompareArrows className="h-4 w-4" />}生成对比
             </button>
           </div>
@@ -570,44 +570,51 @@ export default function EvalsPage() {
         </section>
       )}
 
-      <section className="mt-4 rounded-md border border-line bg-white p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 font-semibold text-ink"><History className="h-4 w-4 text-teal-700" />历史评测</div>
+      <section className="mt-4 rounded-xl border border-line bg-white p-5 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-ink"><History className="h-4 w-4 text-accent" />历史评测</div>
           <span className="text-xs text-slate-500">点击记录恢复完整结果</span>
         </div>
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[900px] text-left text-sm">
-            <thead className="border-b border-line text-xs text-slate-500"><tr><th className="pb-2 font-medium">运行</th><th className="pb-2 font-medium">评测集</th><th className="pb-2 font-medium">时间</th><th className="pb-2 font-medium">Precision</th><th className="pb-2 font-medium">Recall</th><th className="pb-2 font-medium">Faithfulness</th><th className="pb-2 font-medium">完整性</th><th className="pb-2 font-medium">质量</th></tr></thead>
-            <tbody>
-              {history.map((item) => {
-                const metrics = item.metrics || {};
-                const itemStatus = item.result.status || item.status;
-                return (
-                  <tr key={item.eval_id} className="cursor-pointer border-b border-line/70 transition hover:bg-panel" onClick={() => {
-                    setResult({ eval_id: item.eval_id, status: item.status, result: item.result });
-                    setComparison(null);
-                    setBaselineId("");
-                    setNotice("");
-                    setDraftId("");
-                    if (ACTIVE_STATUSES.has(itemStatus)) {
-                      setActiveEvalId(item.eval_id);
-                      setLoading(true);
-                    }
-                  }}>
-                    <td className="py-3 font-medium text-ink">{item.name}</td>
-                    <td className="py-3 text-slate-600">{item.result.evaluation_set?.label || "旧版/未记录"}</td>
-                    <td className="py-3 text-slate-500">{item.created_at ? new Date(item.created_at).toLocaleString("zh-CN") : "-"}</td>
-                    <Score value={metrics.context_precision} />
-                    <Score value={metrics.context_recall} />
-                    <Score value={metrics.faithfulness} />
-                    <td className="py-3">{ACTIVE_STATUSES.has(itemStatus) ? <RunningLabel /> : item.result.evaluation_complete ? <PassLabel text="完整" /> : <FailLabel text="不完整" />}</td>
-                    <td className="py-3"><QualityLabel status={item.result.quality_status || (item.result.passed ? "passed" : "failed")} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {history.length === 0 && <div className="py-6 text-sm text-slate-500">当前仓库暂无 RAGAS Eval。</div>}
+        <div className="mt-4 overflow-hidden rounded-lg border border-line">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-left text-sm">
+              <thead className="border-b border-line bg-panel text-xs text-slate-500"><tr><th className="px-3 py-2.5 font-medium">运行</th><th className="px-3 py-2.5 font-medium">评测集</th><th className="px-3 py-2.5 font-medium">时间</th><th className="px-3 py-2.5 font-medium">Precision</th><th className="px-3 py-2.5 font-medium">Recall</th><th className="px-3 py-2.5 font-medium">Faithfulness</th><th className="px-3 py-2.5 font-medium">完整性</th><th className="px-3 py-2.5 font-medium">质量</th></tr></thead>
+              <tbody>
+                {history.map((item) => {
+                  const metrics = item.metrics || {};
+                  const itemStatus = item.result.status || item.status;
+                  return (
+                    <tr key={item.eval_id} className="cursor-pointer border-t border-line transition-colors hover:bg-panel/60" onClick={() => {
+                      setResult({ eval_id: item.eval_id, status: item.status, result: item.result });
+                      setComparison(null);
+                      setBaselineId("");
+                      setNotice("");
+                      setDraftId("");
+                      if (ACTIVE_STATUSES.has(itemStatus)) {
+                        setActiveEvalId(item.eval_id);
+                        setLoading(true);
+                      }
+                    }}>
+                      <td className="px-3 py-3 font-medium text-ink">{item.name}</td>
+                      <td className="px-3 py-3 text-slate-600">{item.result.evaluation_set?.label || "旧版/未记录"}</td>
+                      <td className="px-3 py-3 text-slate-500">{item.created_at ? new Date(item.created_at).toLocaleString("zh-CN") : "-"}</td>
+                      <Score value={metrics.context_precision} />
+                      <Score value={metrics.context_recall} />
+                      <Score value={metrics.faithfulness} />
+                      <td className="px-3 py-3">{ACTIVE_STATUSES.has(itemStatus) ? <RunningLabel /> : item.result.evaluation_complete ? <PassLabel text="完整" /> : <FailLabel text="不完整" />}</td>
+                      <td className="px-3 py-3"><QualityLabel status={item.result.quality_status || (item.result.passed ? "passed" : "failed")} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {history.length === 0 && (
+            <div className="flex flex-col items-center gap-1 bg-panel/40 px-4 py-9 text-center">
+              <span className="text-sm font-medium text-slate-600">当前仓库暂无 RAGAS Eval</span>
+              <span className="text-xs text-slate-500">运行一次评测后，历史记录会按时间倒序展示在这里。</span>
+            </div>
+          )}
         </div>
       </section>
     </>
@@ -618,18 +625,18 @@ function StatusGroup({ result, active }: { result: EvalResult; active: boolean }
   if (active) return <RunningLabel />;
   return (
     <div className="flex flex-wrap justify-end gap-2">
-      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">运行完成</span>
+      <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">运行完成</span>
       <QualityLabel status={result.quality_status || (result.passed ? "passed" : "failed")} />
       {result.evaluation_complete
-        ? <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">评测完整</span>
-        : <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">评测不完整</span>}
+        ? <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">评测完整</span>
+        : <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">评测不完整</span>}
     </div>
   );
 }
 
 function QualityLabel({ status }: { status: string }) {
   if (status === "passed") return <PassLabel text="质量通过" />;
-  if (status === "incomplete" || status === "partial" || status === "not_evaluated") return <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">质量待判定</span>;
+  if (status === "incomplete" || status === "partial" || status === "not_evaluated") return <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">质量待判定</span>;
   return <FailLabel text="质量未通过" />;
 }
 
@@ -637,13 +644,17 @@ function DiagnosticOverview({ result }: { result: EvalResult }) {
   const counts = result.diagnostics?.category_counts || {};
   const entries = Object.entries(counts);
   return (
-    <div className="mt-4 rounded-md border border-line bg-panel p-4">
-      <div className="flex items-center gap-2 text-sm font-semibold text-ink"><Wrench className="h-4 w-4 text-teal-700" />下一步动作</div>
+    <div className="mt-4 rounded-lg border border-line bg-panel/60 p-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-ink"><Wrench className="h-4 w-4 text-accent" />下一步动作</div>
       {entries.length ? (
         <div className="mt-3 flex flex-wrap gap-2">
-          {entries.map(([category, count]) => <span key={category} className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs text-amber-800">{DIAGNOSIS_LABELS[category] || category} · {count} 条</span>)}
+          {entries.map(([category, count]) => <span key={category} className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-medium text-amber-800">{DIAGNOSIS_LABELS[category] || category} · {count} 条</span>)}
         </div>
-      ) : <p className="mt-2 text-sm text-emerald-700">当前逐题报告没有发现门禁问题，可以进入回归对比。</p>}
+      ) : (
+        <p className="mt-2 flex items-center gap-1.5 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />当前逐题报告没有发现门禁问题，可以进入回归对比。
+        </p>
+      )}
       <p className="mt-3 text-xs leading-5 text-slate-600">
         {result.evaluation_complete
           ? "本次 Judge 结果完整。先展开失败用例，根据建议修改检索、生成或评测规则，再用同一评测集运行并对比。"
@@ -656,19 +667,27 @@ function DiagnosticOverview({ result }: { result: EvalResult }) {
 function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
   const ordered = [...cases].sort((left, right) => Number(casePassed(left)) - Number(casePassed(right)));
   return (
-    <section className="mt-4 rounded-md border border-line bg-white p-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 font-semibold text-ink"><SearchCheck className="h-4 w-4 text-teal-700" />逐题诊断</div>
+    <section className="mt-4 rounded-xl border border-line bg-white p-5 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-base font-semibold tracking-tight text-ink"><SearchCheck className="h-4 w-4 text-accent" />逐题诊断</div>
         <span className="text-xs text-slate-500">失败用例优先排列，点击展开完整运行现场</span>
       </div>
       <div className="mt-4 space-y-3">
         {ordered.map((item) => {
           const passed = casePassed(item);
           return (
-            <details key={item.id} className={`group rounded-md border ${passed ? "border-emerald-200" : "border-rose-200"} bg-white`} open={!passed}>
-              <summary className="flex cursor-pointer list-none items-start justify-between gap-4 p-4">
+            <details key={item.id} className="group overflow-hidden rounded-xl border border-line bg-white" open={!passed}>
+              <summary className="flex cursor-pointer list-none items-start justify-between gap-4 p-4 transition-colors hover:bg-panel/60">
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2"><span className="font-semibold text-ink">{item.id}</span>{passed ? <PassLabel /> : <FailLabel />}{item.ragas_errors && Object.keys(item.ragas_errors).length > 0 && <span className="rounded-full bg-violet-50 px-2 py-1 text-[11px] text-violet-700">Judge 异常</span>}</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-ink">{item.id}</span>
+                    {passed ? <PassLabel /> : <FailLabel />}
+                    {item.ragas_errors && Object.keys(item.ragas_errors).length > 0 && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                        <AlertTriangle className="h-3 w-3" />Judge 异常
+                      </span>
+                    )}
+                  </div>
                   <p className="mt-2 text-sm leading-6 text-slate-700">{item.question}</p>
                   {item.ragas_skipped_reason === NO_ANSWER_SKIP_REASON ? (
                     <p className="mt-2 text-xs text-slate-500">拒答用例，仅检查硬规则</p>
@@ -688,16 +707,16 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
 
                 <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                   {(item.diagnoses || []).map((diagnosis, index) => (
-                    <div key={`${diagnosis.category}-${index}`} className={`rounded-md border p-3 ${diagnosis.severity === "passed" ? "border-emerald-200 bg-emerald-50/60" : diagnosis.severity === "error" ? "border-violet-200 bg-violet-50/60" : "border-amber-200 bg-amber-50/60"}`}>
+                    <div key={`${diagnosis.category}-${index}`} className={`rounded-lg border p-3 ${diagnosis.severity === "passed" ? "border-emerald-200 bg-emerald-50/60" : diagnosis.severity === "error" ? "border-violet-200 bg-violet-50/60" : "border-amber-200 bg-amber-50/60"}`}>
                       <div className="text-sm font-semibold text-ink">{diagnosis.title}</div>
                       <p className="mt-1 text-xs leading-5 text-slate-600">{diagnosis.summary}</p>
-                      <p className="mt-2 text-xs font-medium leading-5 text-slate-800">建议：{diagnosis.action}</p>
+                      <p className="mt-2 text-xs font-medium leading-5 text-slate-700">建议：{diagnosis.action}</p>
                     </div>
                   ))}
                 </div>
 
                 {item.ragas_errors && Object.keys(item.ragas_errors).length > 0 && (
-                  <div className="mt-4 rounded-md border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900">
+                  <div className="mt-4 rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900">
                     <div className="font-semibold">Judge 错误</div>
                     {Object.entries(item.ragas_errors).map(([name, message]) => <div key={name} className="mt-1"><code>{name}</code>：{message}</div>)}
                   </div>
@@ -706,11 +725,11 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
                 <HardRulePanel hard={item.hard_rules} expectedSources={item.expected_source_files} />
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-md border border-line p-3">
+                  <div className="rounded-lg border border-line bg-panel/40 p-3">
                     <div className="text-xs font-semibold text-slate-700">检索来源 · {item.retrieved_sources.length}</div>
                     <div className="mt-2 space-y-2">
                       {item.retrieved_sources.map((source, index) => (
-                        <div key={`${source.source_id || source.id}-${index}`} className="rounded bg-panel px-3 py-2 text-xs text-slate-700">
+                        <div key={`${source.source_id || source.id}-${index}`} className="rounded-md border border-line/70 bg-white px-3 py-2 text-xs text-slate-700">
                           <span className="font-medium">{index + 1}. {source.title || source.source_id || "未知来源"}</span>
                           <span className="ml-2 text-slate-400">{source.source_type || "-"}{typeof source.score === "number" ? ` · ${source.score.toFixed(4)}` : ""}</span>
                         </div>
@@ -718,11 +737,11 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
                       {!item.retrieved_sources.length && <p className="text-xs text-slate-500">没有检索来源。</p>}
                     </div>
                   </div>
-                  <div className="rounded-md border border-line p-3">
+                  <div className="rounded-lg border border-line bg-panel/40 p-3">
                     <div className="text-xs font-semibold text-slate-700">工具轨迹 · {item.tool_calls.length}</div>
                     <div className="mt-2 space-y-2">
                       {item.tool_calls.map((tool, index) => (
-                        <div key={`${tool.tool_name}-${index}`} className="rounded bg-panel px-3 py-2 text-xs text-slate-700">
+                        <div key={`${tool.tool_name}-${index}`} className="rounded-md border border-line/70 bg-white px-3 py-2 text-xs text-slate-700">
                           <div className="flex items-center justify-between gap-2"><span className="font-medium">{tool.tool_name || "unknown"}</span><span className={tool.status === "error" ? "text-rose-600" : "text-emerald-600"}>{tool.status || "-"}</span></div>
                           {tool.arguments && <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[11px] text-slate-500">{JSON.stringify(tool.arguments, null, 2)}</pre>}
                         </div>
@@ -732,10 +751,10 @@ function CaseDiagnostics({ cases }: { cases: RagCaseResult[] }) {
                   </div>
                 </div>
 
-                <details className="mt-4 rounded-md border border-line bg-panel p-3">
+                <details className="mt-4 rounded-lg border border-line bg-panel/40 p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-slate-700">查看完整检索上下文 · {item.retrieved_contexts.length} 条</summary>
                   <div className="mt-3 space-y-2">
-                    {item.retrieved_contexts.map((context, index) => <pre key={index} className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-white p-3 text-xs leading-5 text-slate-600">[{index + 1}] {context}</pre>)}
+                    {item.retrieved_contexts.map((context, index) => <pre key={index} className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-line/70 bg-white p-3 text-xs leading-5 text-slate-600">[{index + 1}] {context}</pre>)}
                   </div>
                 </details>
                 <div className="mt-3 text-xs text-slate-500">路由：{item.route || "-"} · 来源文件：{item.source_file || "-"} · 耗时：{Math.round(item.latency_ms)} ms</div>
@@ -760,10 +779,10 @@ function HardRulePanel({ hard, expectedSources }: { hard: HardRules; expectedSou
     rows.unshift(["预期来源全部命中", hard.source_hit], ["取得检索上下文", hard.contexts_present]);
   }
   return (
-    <div className="mt-4 rounded-md border border-line p-3">
+    <div className="mt-4 rounded-lg border border-line bg-panel/40 p-3">
       <div className="text-xs font-semibold text-slate-700">确定性硬规则</div>
       <div className="mt-2 flex flex-wrap gap-2">
-        {rows.map(([label, ok]) => <span key={label} className={`rounded-full px-2.5 py-1 text-[11px] ${ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{ok ? "✓" : "×"} {label}</span>)}
+        {rows.map(([label, ok]) => <span key={label} className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{ok ? "✓" : "×"} {label}</span>)}
       </div>
       {expectedSources && expectedSources.length > 0 && <p className="mt-2 text-xs text-slate-500">预期来源：{expectedSources.join("、")}</p>}
       {hard.missing_sources && hard.missing_sources.length > 0 && <p className="mt-1 text-xs text-rose-700">缺少来源：{hard.missing_sources.join("、")}</p>}
@@ -777,15 +796,23 @@ function HardRulePanel({ hard, expectedSources }: { hard: HardRules; expectedSou
 
 function ComparisonPanel({ comparison }: { comparison: EvalComparison }) {
   return (
-    <div className={`mt-4 rounded-md border p-4 ${comparison.comparable ? comparison.release_gate_passed ? "border-emerald-200 bg-emerald-50/50" : "border-amber-200 bg-amber-50/50" : "border-rose-200 bg-rose-50/50"}`}>
+    <div className={`mt-4 rounded-lg border p-4 ${comparison.comparable ? comparison.release_gate_passed ? "border-emerald-200 bg-emerald-50/50" : "border-amber-200 bg-amber-50/50" : "border-rose-200 bg-rose-50/50"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-semibold text-ink">{comparison.comparable ? "评测配置可比" : "不能作为严格 A/B 对照"}</div>
-        <span className={`rounded-full px-3 py-1 text-xs font-medium ${comparison.release_gate_passed ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{comparison.release_gate_passed ? "回归门禁通过" : "回归门禁未通过"}</span>
+        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${comparison.release_gate_passed ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}`}>{comparison.release_gate_passed ? "回归门禁通过" : "回归门禁未通过"}</span>
       </div>
       {!!comparison.incompatibility_reasons.length && <p className="mt-2 text-sm text-rose-700">{comparison.incompatibility_reasons.join("；")}</p>}
-      <div className="mt-3 flex flex-wrap gap-2 text-xs"><span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-800">改善 {comparison.improved_cases} 条</span><span className="rounded-full bg-rose-100 px-2.5 py-1 text-rose-800">回归 {comparison.regressed_cases} 条</span></div>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[620px] text-left text-xs"><thead className="border-b border-line text-slate-500"><tr><th className="pb-2">指标</th><th className="pb-2">基线</th><th className="pb-2">候选</th><th className="pb-2">变化</th></tr></thead><tbody>{comparison.metric_deltas.map((item) => <tr key={item.name} className="border-b border-line/60"><td className="py-2 font-medium text-slate-700">{METRIC_LABELS[item.name] || item.name}</td><td className="py-2">{formatMetric(item.name, item.base)}</td><td className="py-2">{formatMetric(item.name, item.candidate)}</td><td className={`py-2 font-medium ${item.delta > 0 ? "text-emerald-700" : item.delta < 0 ? "text-rose-700" : "text-slate-500"}`}>{item.delta > 0 ? "+" : ""}{(item.delta * 100).toFixed(1)} pp</td></tr>)}</tbody></table>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-1 font-medium text-emerald-800">改善 {comparison.improved_cases} 条</span>
+        <span className="inline-flex items-center rounded-full bg-rose-100 px-2.5 py-1 font-medium text-rose-800">回归 {comparison.regressed_cases} 条</span>
+      </div>
+      <div className="mt-4 overflow-hidden rounded-lg border border-line bg-white">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-left text-xs">
+            <thead className="border-b border-line bg-panel text-slate-500"><tr><th className="px-3 py-2 font-medium">指标</th><th className="px-3 py-2 font-medium">基线</th><th className="px-3 py-2 font-medium">候选</th><th className="px-3 py-2 font-medium">变化</th></tr></thead>
+            <tbody>{comparison.metric_deltas.map((item) => <tr key={item.name} className="border-t border-line transition-colors hover:bg-panel/60"><td className="px-3 py-2 font-medium text-slate-700">{METRIC_LABELS[item.name] || item.name}</td><td className="px-3 py-2 tabular-nums text-slate-600">{formatMetric(item.name, item.base)}</td><td className="px-3 py-2 tabular-nums text-slate-600">{formatMetric(item.name, item.candidate)}</td><td className={`px-3 py-2 font-medium tabular-nums ${item.delta > 0 ? "text-emerald-700" : item.delta < 0 ? "text-rose-700" : "text-slate-500"}`}>{item.delta > 0 ? "+" : ""}{(item.delta * 100).toFixed(1)} pp</td></tr>)}</tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -806,15 +833,15 @@ function ProgressPanel({ progress, runMode }: { progress?: EvalResult["progress"
   }, []);
 
   return (
-    <div className="flex min-h-72 items-center justify-center py-8">
-      <div className="w-full max-w-xl rounded-md border border-sky-200 bg-sky-50/60 p-6">
+    <div className="flex min-h-72 flex-1 items-center justify-center py-8">
+      <div className="w-full max-w-xl rounded-xl border border-sky-200 bg-sky-50/60 p-6">
         <div className="flex items-start gap-3">
-          <LoaderCircle className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-sky-700" />
+          <LoaderCircle className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-sky-600" />
           <div className="min-w-0 flex-1"><div className="font-semibold text-ink">{runMode === "rescore" ? "正在复用现场重试 Judge 指标" : "真实 ChatAgent 正在后台评测"}</div><p className="mt-2 text-sm leading-6 text-slate-600">{progress?.message || "后台任务正在启动。"}</p></div>
         </div>
         <div className="mt-5 h-2 overflow-hidden rounded-full bg-sky-100"><div className="h-full rounded-full bg-sky-600 transition-all duration-500" style={{ width: `${percent}%` }} /></div>
         <div className="mt-2 flex items-center justify-between text-xs text-slate-500"><span>{total > 0 ? `已完成 ${completed}/${total}` : "正在准备"}</span><span>阶段持续 {stageSeconds} 秒 · 更新于 {updated}</span></div>
-        <div className="mt-4 rounded-md border border-sky-100 bg-white/80 p-3 text-xs leading-5 text-slate-600">{runMode === "rescore" ? "本任务不会重新调用 ChatAgent，原问题、答案、证据和工具轨迹保持不变。" : "单条用例包含真实 ChatAgent 工具调用和 RAGAS Judge 评分。任务在后台运行，可以刷新或离开页面。"}</div>
+        <div className="mt-4 rounded-lg border border-sky-100 bg-white/80 p-3 text-xs leading-5 text-slate-600">{runMode === "rescore" ? "本任务不会重新调用 ChatAgent，原问题、答案、证据和工具轨迹保持不变。" : "单条用例包含真实 ChatAgent 工具调用和 RAGAS Judge 评分。任务在后台运行，可以刷新或离开页面。"}</div>
       </div>
     </div>
   );
@@ -825,9 +852,9 @@ function MetricCard({ label, description, detail }: { label: string; description
   const ok = detail?.passed === true;
   const unavailable = typeof score !== "number";
   return (
-    <div className={`rounded-md border p-3 ${unavailable ? "border-slate-200 bg-slate-50" : ok ? "border-emerald-200 bg-emerald-50/50" : "border-rose-200 bg-rose-50/60"}`}>
-      <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-700">{label}</span>{unavailable ? <AlertTriangle className="h-4 w-4 text-slate-400" /> : ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-rose-600" />}</div>
-      <div className="mt-2 text-2xl font-semibold text-ink">{unavailable ? "—" : `${Math.round(score * 100)}%`}</div>
+    <div className={`rounded-lg border p-3.5 ${unavailable ? "border-line bg-panel" : ok ? "border-emerald-200 bg-emerald-50/60" : "border-rose-200 bg-rose-50/60"}`}>
+      <div className="flex items-center justify-between gap-2"><span className="text-xs font-medium text-slate-600">{label}</span>{unavailable ? <AlertTriangle className="h-4 w-4 text-slate-400" /> : ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-rose-600" />}</div>
+      <div className="mt-2 text-2xl font-semibold tabular-nums text-ink">{unavailable ? "—" : `${Math.round(score * 100)}%`}</div>
       <div className="mt-1 text-[11px] leading-4 text-slate-500">{description}</div>
       <div className="mt-2 text-[11px] text-slate-500">门槛 ≥ {Math.round((detail?.threshold || 0) * 100)}% · {detail?.scored_cases || 0} 条</div>
     </div>
@@ -835,32 +862,57 @@ function MetricCard({ label, description, detail }: { label: string; description
 }
 
 function TextPanel({ title, content }: { title: string; content: string }) {
-  return <div className="rounded-md border border-line bg-panel p-3"><div className="text-xs font-semibold text-slate-700">{title}</div><div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{content}</div></div>;
+  return <div className="rounded-lg border border-line bg-panel/60 p-3"><div className="text-xs font-semibold text-slate-700">{title}</div><div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{content}</div></div>;
 }
 
 function ScoreChip({ label, value }: { label: string; value?: number }) {
-  return <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] text-slate-600">{label} {typeof value === "number" ? `${Math.round(value * 100)}%` : "—"}</span>;
+  return <span className={`rounded-full px-2 py-1 text-[10px] font-medium ${scoreTone(value)}`}>{label} {typeof value === "number" ? `${Math.round(value * 100)}%` : "—"}</span>;
 }
 
 function Summary({ label, value, suffix = "%", digits = 0 }: { label: string; value?: number; suffix?: string; digits?: number }) {
   const display = typeof value === "number" ? `${(suffix === "%" ? value * 100 : value).toFixed(digits)}${suffix}` : "—";
-  return <div className="rounded-md border border-line bg-white p-3"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 text-xl font-semibold text-ink">{display}</div></div>;
+  return <div className="rounded-lg border border-line bg-panel/50 p-3.5"><div className="text-xs text-slate-500">{label}</div><div className="mt-1 text-xl font-semibold tabular-nums text-ink">{display}</div></div>;
 }
 
 function Score({ value }: { value?: number }) {
-  return <td className="py-3 pr-4 font-medium text-slate-700">{typeof value === "number" ? `${Math.round(value * 100)}%` : "—"}</td>;
+  return (
+    <td className="px-3 py-3">
+      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${scoreTone(value)}`}>
+        {typeof value === "number" ? `${Math.round(value * 100)}%` : "—"}
+      </span>
+    </td>
+  );
 }
 
 function PassLabel({ text = "通过" }: { text?: string }) {
-  return <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{text}</span>;
+  return <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">{text}</span>;
 }
 
 function FailLabel({ text = "未通过" }: { text?: string }) {
-  return <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">{text}</span>;
+  return <span className="inline-flex items-center rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">{text}</span>;
 }
 
 function RunningLabel() {
-  return <span className="rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">运行中</span>;
+  return <span className="inline-flex items-center rounded-full bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">运行中</span>;
+}
+
+function EmptyResult() {
+  return (
+    <div className="mt-4 flex min-h-72 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel/40 px-6 py-12 text-center">
+      <span className="grid h-12 w-12 place-items-center rounded-xl bg-accent-soft text-indigo-600">
+        <Gauge className="h-6 w-6" />
+      </span>
+      <p className="mt-4 text-sm font-medium text-slate-700">还没有本次评测结果</p>
+      <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">在左侧选择仓库与评测集后点击「运行评测」；完成后这里会展示质量状态、指标卡、下一步动作和逐题诊断。</p>
+    </div>
+  );
+}
+
+function scoreTone(value?: number) {
+  if (typeof value !== "number") return "bg-slate-100 text-slate-500";
+  if (value >= 0.8) return "bg-emerald-50 text-emerald-700";
+  if (value >= 0.6) return "bg-amber-50 text-amber-700";
+  return "bg-rose-50 text-rose-700";
 }
 
 function casePassed(item: RagCaseResult) {

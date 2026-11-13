@@ -261,7 +261,7 @@ export default function RAGPage() {
   }
 
   return (
-    <div className="-m-3 flex min-h-[calc(100vh-57px)] flex-col bg-canvas lg:h-[calc(100vh-57px)] lg:overflow-hidden">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-canvas">
       <header className="border-b border-line bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-3">
@@ -324,8 +324,8 @@ export default function RAGPage() {
         </div>
       )}
 
-      <div className="m-3 grid min-h-0 flex-1 overflow-hidden rounded-xl border border-line bg-white shadow-xs lg:grid-cols-[300px_minmax(420px,1fr)_340px]">
-        <aside className="flex min-h-[360px] flex-col border-b border-line bg-panel/60 lg:border-b-0 lg:border-r">
+      <div className="m-3 grid min-h-0 flex-1 overflow-hidden rounded-xl border border-line bg-white shadow-xs md:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+        <aside className="hidden min-h-0 flex-col border-b border-line bg-panel/60 md:flex md:border-b-0 md:border-r">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink"><Database className="h-4 w-4 text-indigo-600" />知识库</div>
             <button type="button" onClick={reindex} disabled={!repoId || busy === "reindex"} title="重建向量索引" aria-label="重建向量索引" className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white hover:text-indigo-600 disabled:opacity-50">
@@ -358,7 +358,7 @@ export default function RAGPage() {
           </div>
         </aside>
 
-        <main className="flex min-h-[520px] min-w-0 flex-col bg-white">
+        <main className="flex min-h-0 min-w-0 flex-col bg-white">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink"><Sparkles className="h-4 w-4 text-indigo-600" />问答</div>
             {turns.length > 0 && <button type="button" onClick={() => { setTurns([]); setSources([]); }} className="text-xs text-slate-500 transition-colors hover:text-ink">清空会话</button>}
@@ -387,7 +387,7 @@ export default function RAGPage() {
             ))}
             {busy === "ask" && <div className="flex items-center gap-2 text-sm text-slate-500"><LoaderCircle className="h-4 w-4 animate-spin" />正在检索并生成回答</div>}
           </div>
-          <div className="border-t border-line bg-panel/70 p-3">
+          <div className="shrink-0 border-t border-line bg-panel/70 p-3">
             <textarea
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
@@ -418,7 +418,7 @@ export default function RAGPage() {
           </div>
         </main>
 
-        <aside className="flex min-h-[360px] flex-col border-t border-line bg-panel/60 lg:border-l lg:border-t-0">
+        <aside className="hidden min-h-0 flex-col border-t border-line bg-panel/60 xl:flex xl:border-l xl:border-t-0">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink"><Search className="h-4 w-4 text-indigo-600" />检索证据</div>
             <span className="text-xs text-slate-500">{sources.length} 条</span>

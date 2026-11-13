@@ -13,10 +13,11 @@
 
 html,
 body {
-  min-height: 100%;
+  height: 100%;
 }
 
 body {
+  overflow: hidden;
   color: var(--ink);
   background-color: var(--canvas);
   background-image: radial-gradient(64rem 30rem at 50% -14rem, rgb(79 70 229 / 0.08), transparent 70%);

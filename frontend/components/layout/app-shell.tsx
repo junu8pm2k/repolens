@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
@@ -18,10 +19,15 @@ const navItems = [
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+  }, [pathname]);
 
   return (
-    <main className="min-h-screen text-ink">
-      <header className="sticky top-0 z-40 border-b border-line/80 bg-white/85 backdrop-blur-md">
+    <main className="flex h-full min-h-0 flex-col text-ink">
+      <header className="z-40 shrink-0 border-b border-line/80 bg-white/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 w-full max-w-[1600px] items-center gap-1.5 px-4">
           <Link href="/" className="mr-3 flex shrink-0 items-center gap-2.5">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 text-[13px] font-bold text-white shadow-xs">
@@ -52,7 +58,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
       </header>
-      <div className="mx-auto w-full max-w-[1600px] p-3">{children}</div>
+      <div ref={contentRef} className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col overflow-y-auto overflow-x-hidden p-3">
+        {children}
+      </div>
     </main>
   );
 }

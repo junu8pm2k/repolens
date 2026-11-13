@@ -883,6 +883,14 @@ const prCategoryMeta = [
   { key: "rejected", label: "已拒绝", color: "text-slate-500" }
 ] as const;
 
+const SIDEBAR_WIDTH = 288;
+const SIDEBAR_COLLAPSED_WIDTH = 56;
+const SIDEBAR_AUTO_COLLAPSE_WIDTH = 1180;
+const SHELL_PADDING = 24;
+const WORKSPACE_MIN_WIDTH = 280;
+const WORKSPACE_MAX_WIDTH = 480;
+const CHAT_MIN_WIDTH = 360;
+
 export default function DashboardPage() {
   const [repos, setRepos] = useState<Repository[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState("");
@@ -895,7 +903,8 @@ export default function DashboardPage() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("Issue");
-  const [workspaceWidth, setWorkspaceWidth] = useState(420);
+  const [workspaceWidth, setWorkspaceWidth] = useState(400);
+  const [workspaceMaxWidth, setWorkspaceMaxWidth] = useState(WORKSPACE_MAX_WIDTH);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
   const [workspaceStatus, setWorkspaceStatus] = useState("all");
   const [workspaceOwner, setWorkspaceOwner] = useState("all");
@@ -958,6 +967,8 @@ export default function DashboardPage() {
   const skipHistoryLoadRef = useRef(false);
   const preserveWorkspaceSelectionRef = useRef(false);
   const streamAbortRef = useRef<AbortController | null>(null);
+  const wasWideLayoutRef = useRef(true);
+  const autoCollapsedSidebarRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const promptRowRef = useRef<HTMLDivElement>(null);
   const promptMeasureRef = useRef<HTMLDivElement>(null);
@@ -1722,14 +1733,38 @@ export default function DashboardPage() {
     };
   }, [promptSuggestions, loadingPrompts]);
 
+  useEffect(() => {
+    function fitLayout() {
+      const narrow = window.innerWidth < SIDEBAR_AUTO_COLLAPSE_WIDTH;
+      if (narrow && wasWideLayoutRef.current) {
+        autoCollapsedSidebarRef.current = true;
+        setIsSidebarCollapsed(true);
+      }
+      if (!narrow && autoCollapsedSidebarRef.current) {
+        autoCollapsedSidebarRef.current = false;
+        setIsSidebarCollapsed(false);
+      }
+      wasWideLayoutRef.current = !narrow;
+      const sidebar = isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+      const available = window.innerWidth - SHELL_PADDING - sidebar - 8;
+      setWorkspaceMaxWidth(
+        Math.max(WORKSPACE_MIN_WIDTH, Math.min(WORKSPACE_MAX_WIDTH, available - CHAT_MIN_WIDTH, Math.round(available * 0.42)))
+      );
+    }
+
+    fitLayout();
+    window.addEventListener("resize", fitLayout);
+    return () => window.removeEventListener("resize", fitLayout);
+  }, [isSidebarCollapsed]);
+
   function startResize(event: MouseEvent<HTMLDivElement>) {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = workspaceWidth;
+    const startWidth = Math.max(WORKSPACE_MIN_WIDTH, Math.min(workspaceWidth, workspaceMaxWidth));
 
     function onMove(moveEvent: globalThis.MouseEvent) {
       const delta = startX - moveEvent.clientX;
-      setWorkspaceWidth(Math.min(640, Math.max(360, startWidth + delta)));
+      setWorkspaceWidth(Math.min(workspaceMaxWidth, Math.max(WORKSPACE_MIN_WIDTH, startWidth + delta)));
     }
 
     function onUp() {
@@ -2459,8 +2494,8 @@ export default function DashboardPage() {
 
   return (
     <div
-      className="relative grid h-[calc(100vh-81px)] min-h-0 overflow-hidden rounded-xl border border-line bg-white shadow-xs"
-      style={{ gridTemplateColumns: `${isSidebarCollapsed ? "56px" : "300px"} minmax(0,1fr)`, transition: "grid-template-columns 260ms ease" }}
+      className="relative grid h-full min-h-0 overflow-hidden rounded-xl border border-line bg-white shadow-xs"
+      style={{ gridTemplateColumns: `${isSidebarCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH}px` : `${SIDEBAR_WIDTH}px`} minmax(0,1fr)`, transition: "grid-template-columns 260ms ease" }}
     >
       <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-panel transition-all duration-300">
         {isSidebarCollapsed ? (
@@ -2613,7 +2648,7 @@ export default function DashboardPage() {
 
       <section
         className="grid min-h-0 min-w-0 bg-white"
-        style={{ gridTemplateColumns: `minmax(460px,1fr) 8px ${workspaceWidth}px`, gridTemplateRows: "auto minmax(0,1fr)" }}
+        style={{ gridTemplateColumns: `minmax(0,1fr) 8px minmax(${WORKSPACE_MIN_WIDTH}px, ${Math.max(WORKSPACE_MIN_WIDTH, Math.min(workspaceWidth, workspaceMaxWidth))}px)`, gridTemplateRows: "auto minmax(0,1fr)" }}
       >
         <section className="col-start-1 row-start-1 shrink-0 border-b border-line bg-white px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2980,7 +3015,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="border-t border-line bg-white px-4 py-3">
+            <div className="shrink-0 border-t border-line bg-white px-4 py-3">
               <div className="w-full">
                 {(promptSuggestions.length > 0 || loadingPrompts) && (
                   <div className="mb-2.5 flex items-center gap-2">
@@ -3036,7 +3071,7 @@ export default function DashboardPage() {
                 )}
                 <div className="flex items-stretch gap-2">
                   <textarea
-                    className={`max-h-40 min-h-[5.5rem] flex-1 resize-none rounded-xl border bg-white px-3.5 py-3 text-sm leading-6 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${
+                    className={`max-h-40 min-h-[4.5rem] min-w-0 flex-1 resize-none rounded-xl border bg-white px-3.5 py-3 text-sm leading-6 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${
                       planMode ? "border-indigo-300 ring-2 ring-indigo-100" : "border-line"
                     }`}
                     value={message}

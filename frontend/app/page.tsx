@@ -972,9 +972,14 @@ export default function DashboardPage() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const promptRowRef = useRef<HTMLDivElement>(null);
   const promptMeasureRef = useRef<HTMLDivElement>(null);
+  const activeRepositoryId = useRef("");
   const [visiblePromptCount, setVisiblePromptCount] = useState(5);
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0], [repos, selectedRepoId]);
+  useEffect(() => {
+    activeRepositoryId.current = selectedRepo?.id ?? "";
+    return () => { activeRepositoryId.current = ""; };
+  }, [selectedRepo?.id]);
   const selectedRepoConversations = selectedRepo ? conversationMap[selectedRepo.id] ?? [] : [];
   const isDraftConversation = isDraftConversationId(selectedConversationId);
   const selectedConversation = isDraftConversation
@@ -1015,6 +1020,7 @@ export default function DashboardPage() {
       apiGet<PullRequest[]>(`/api/repos/${repoId}/pull-requests`).catch(() => []),
       apiGet<WorkflowRun[]>(`/api/repos/${repoId}/workflow-runs`).catch(() => [])
     ]);
+    if (activeRepositoryId.current !== repoId) return;
     setIssues(issueItems);
     setPrs(prItems);
     setRuns(runItems);
@@ -1425,6 +1431,7 @@ export default function DashboardPage() {
       apiGet<TeamMember[]>(`/api/repos/${repoId}/team-members`).catch(() => []),
       apiGet<KnowledgeItem[]>(`/api/repos/${repoId}/knowledge`).catch(() => [])
     ]);
+    if (activeRepositoryId.current !== repoId) return;
     setTeamMembers(members);
     setKnowledgeItems(knowledge);
     setMemoryNotes(
@@ -1458,10 +1465,10 @@ export default function DashboardPage() {
       const graph = await apiGet<KnowledgeGraphResponse>(`/api/repos/${repoId}/knowledge/graph?${params.toString()}`);
       setKnowledgeGraphByRepo((items) => ({ ...items, [repoId]: graph }));
       const preferred = center ? graph.nodes.find((node) => node.type === center.type && node.id === center.id) : graph.nodes[0];
-      setSelectedGraphNodeKey(preferred ? knowledgeGraphNodeKey(preferred) : null);
+      if (activeRepositoryId.current === repoId) setSelectedGraphNodeKey(preferred ? knowledgeGraphNodeKey(preferred) : null);
       return graph;
     } catch (error) {
-      setGraphError(getFriendlyError(error));
+      if (activeRepositoryId.current === repoId) setGraphError(getFriendlyError(error));
       setKnowledgeGraphByRepo((items) => ({ ...items, [repoId]: null }));
       return null;
     } finally {
@@ -1544,12 +1551,13 @@ export default function DashboardPage() {
     };
   }
 
-  async function loadChatHistory(repo: Repository, conversation: ProjectConversation) {
+  async function loadChatHistory(repo: Repository, conversation: ProjectConversation, isCurrent: () => boolean) {
     async function loadCompleteHistory() {
       const pageSize = 500;
       const history: ChatHistoryMessage[] = [];
       let beforeMessageId: string | undefined;
       while (true) {
+        if (!isCurrent()) return [];
         const cursor = beforeMessageId ? `&before_message_id=${beforeMessageId}` : "";
         const page = await apiGet<ChatHistoryMessage[]>(
           `/api/chat/history?repo_id=${repo.id}&conversation_id=${conversation.id}&limit=${pageSize}${cursor}`
@@ -1567,6 +1575,7 @@ export default function DashboardPage() {
       loadCompleteHistory(),
       apiGet<ChatFeedbackRecord[]>(`/api/chat/feedback?repo_id=${repo.id}&conversation_id=${conversation.id}&limit=200`)
     ]);
+    if (!isCurrent()) return;
     if (!history.length) {
       setMessages([welcomeMessage(repo, conversation)]);
       return;
@@ -1607,6 +1616,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (selectedRepo?.id) {
+      setIssues([]);
+      setPrs([]);
+      setRuns([]);
+      setTeamMembers([]);
+      setKnowledgeItems([]);
+      setMemoryNotes([]);
       loadRepoData(selectedRepo.id);
       loadProjectKnowledge(selectedRepo.id);
       loadProjectIndexState(selectedRepo.id);
@@ -1638,12 +1653,14 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!selectedRepo?.id) return;
     if (isDraftConversation) return;
+    let cancelled = false;
     const conversations = conversationMap[selectedRepo.id] ?? [];
     if (conversations.length === 0) {
       loadRepoConversations(selectedRepo.id).then((items) => {
+        if (cancelled) return;
         setSelectedConversationId((current) => (items.some((item) => item.id === current) ? current : items[0]?.id || ""));
       });
-      return;
+      return () => { cancelled = true; };
     }
     if (!conversations.some((item) => item.id === selectedConversationId)) {
       setSelectedConversationId(conversations[0].id);
@@ -1657,7 +1674,12 @@ export default function DashboardPage() {
       return;
     }
     if (selectedRepo?.id && selectedConversation?.id) {
-      loadChatHistory(selectedRepo, selectedConversation).catch(() => setMessages([welcomeMessage(selectedRepo, selectedConversation)]));
+      let cancelled = false;
+      setMessages([welcomeMessage(selectedRepo, selectedConversation)]);
+      loadChatHistory(selectedRepo, selectedConversation, () => !cancelled).catch(() => {
+        if (!cancelled) setMessages([welcomeMessage(selectedRepo, selectedConversation)]);
+      });
+      return () => { cancelled = true; };
     }
   }, [selectedRepo?.id, selectedConversation?.id, isDraftConversation]);
 
@@ -1781,13 +1803,18 @@ export default function DashboardPage() {
   }
 
   async function selectProject(repo: Repository) {
+    if (activeRepositoryId.current !== repo.id) streamAbortRef.current?.abort();
+    activeRepositoryId.current = repo.id;
     setSelectedRepoId(repo.id);
     setExpandedRepoIds((items) => ({ ...items, [repo.id]: !items[repo.id] }));
     const conversations = conversationMap[repo.id]?.length ? conversationMap[repo.id] : await loadRepoConversations(repo.id);
+    if (activeRepositoryId.current !== repo.id) return;
     setSelectedConversationId((current) => (conversations.some((item) => item.id === current) ? current : conversations[0]?.id || ""));
   }
 
   async function selectConversation(repo: Repository, conversation: ProjectConversation) {
+    if (activeRepositoryId.current !== repo.id || selectedConversation?.id !== conversation.id) streamAbortRef.current?.abort();
+    activeRepositoryId.current = repo.id;
     setSelectedRepoId(repo.id);
     setExpandedRepoIds((items) => ({ ...items, [repo.id]: true }));
     setSelectedConversationId(conversation.id);
@@ -1795,6 +1822,8 @@ export default function DashboardPage() {
   }
 
   async function addConversation(repo: Repository) {
+    streamAbortRef.current?.abort();
+    activeRepositoryId.current = repo.id;
     setExpandedRepoIds((items) => ({ ...items, [repo.id]: true }));
     setSelectedRepoId(repo.id);
     setSelectedConversationId(makeDraftConversationId(repo.id));

@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     embedding_base_url: str | None = None
     local_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     local_embedding_device: str | None = None
+    local_embedding_cache_dir: str = ".data/huggingface/hub"
+    local_embedding_local_files_only: bool = False
     qwen_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     dashscope_api_key: str | None = None
     dashscope_embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

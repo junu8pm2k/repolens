@@ -7,13 +7,14 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Document, KnowledgeBaseConfig
+from app.db.models import Document, KnowledgeBaseConfig, Repository
 from app.services.rag.answer_gate import gate_response_message
 from app.services.llm.client import LLMClient
 from app.services.rag.embeddings import embed_knowledge_texts, embed_texts, embedding_provider_name
 from app.services.rag.knowledge_base import retrieve_knowledge
 from app.services.rag.retrieval import search_similar_documents
 from app.services.rag.source_policy import RAG_SOURCE_TYPES, normalize_source_types, policy_metadata, should_vectorize
+from app.services.rag.repository_facts import answer_latest_commit, is_latest_commit_question
 from app.services.rag.vector_store import delete_milvus_documents, milvus_runtime_status, upsert_milvus_documents
 
 RAG_SYSTEM_PROMPT = """你是一个严谨的检索增强问答助手。
@@ -158,6 +159,10 @@ async def answer_question(
     llm: LLMClient | None = None,
 ) -> dict[str, Any]:
     started = time.perf_counter()
+    if not source_types and not metadata_filters and is_latest_commit_question(question) and hasattr(db, "get"):
+        repo = db.get(Repository, _as_uuid(repo_id))
+        if repo is not None:
+            return await answer_latest_commit(repo, question)
     retrieval_config: dict[str, Any] = {}
     if hasattr(db, "query"):
         items, retrieval_config, _duration_ms = await retrieve_knowledge(

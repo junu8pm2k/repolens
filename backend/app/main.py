@@ -30,6 +30,7 @@ from app.db.models import Base
 from app.db.session import engine
 from app.services.scheduler import periodic_repo_sync_loop
 from app.services.rag.vector_store import MilvusUnavailableError
+from app.services.rag.embeddings import EmbeddingUnavailableError
 
 
 def _cors_origins() -> list[str]:
@@ -53,6 +54,13 @@ def _cors_origin_regex() -> str | None:
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version="0.1.0")
+
+    @app.exception_handler(EmbeddingUnavailableError)
+    async def embedding_unavailable_handler(_request, exc: EmbeddingUnavailableError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": str(exc), "service": "embedding", "status": "degraded"},
+        )
 
     @app.exception_handler(MilvusUnavailableError)
     async def milvus_unavailable_handler(_request, exc: MilvusUnavailableError) -> JSONResponse:

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { apiDelete, apiGet, apiPost, apiUpload } from "@/lib/api";
@@ -49,7 +49,7 @@ type RAGAnswer = {
   answer: string;
   sources: RAGSource[];
   retrieval_count: number;
-  generation_mode: "llm" | "extractive" | "no_evidence";
+  generation_mode: "llm" | "extractive" | "direct" | "no_evidence";
   model?: string | null;
   took_ms: number;
 };
@@ -76,12 +76,13 @@ type ChatTurn = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  mode?: RAGAnswer["generation_mode"];
+  mode?: RAGAnswer["generation_mode"] | "error";
   tookMs?: number;
   sourceCount?: number;
 };
 
 const sourceTypeLabels: Record<string, string> = {
+  git_commit: "Git 提交",
   knowledge_file: "文档",
   memory_note: "笔记",
   project_doc: "项目文档",
@@ -104,6 +105,9 @@ function formatDate(value?: string | null) {
 }
 
 function errorMessage(error: unknown) {
+  if (error instanceof TypeError && /failed to fetch|networkerror|load failed/i.test(error.message)) {
+    return "无法连接后端服务，请确认后端正在运行后重试。";
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -122,29 +126,61 @@ export default function RAGPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const qaScrollRef = useRef<HTMLDivElement>(null);
+  const activeRepoId = useRef("");
+  const requestScope = useRef(0);
+  const knowledgeRequest = useRef(0);
 
   const currentRepo = useMemo(() => repos.find((repo) => repo.id === repoId) ?? null, [repos, repoId]);
   const availableSourceTypes = useMemo(() => Object.keys(status?.source_types ?? {}).sort(), [status]);
 
-  async function loadRepos(preferredId?: string) {
-    const items = await apiGet<Repository[]>("/api/rag/repositories");
-    setRepos(items);
-    const nextId = preferredId && items.some((item) => item.id === preferredId) ? preferredId : repoId && items.some((item) => item.id === repoId) ? repoId : items[0]?.id ?? "";
-    setRepoId(nextId);
-  }
+  const selectRepo = useCallback((id: string) => {
+    activeRepoId.current = id;
+    requestScope.current += 1;
+    knowledgeRequest.current += 1;
+    setRepoId(id);
+    setKnowledge([]);
+    setStatus(null);
+    setTurns([]);
+    setSources([]);
+    setQuestion("");
+    setSourceType("");
+    setError(null);
+    setNotice(null);
+    setBusy(null);
+  }, []);
 
-  async function loadKnowledge(id: string) {
-    const [nextKnowledge, nextStatus] = await Promise.all([
-      apiGet<KnowledgeItem[]>(`/api/repos/${id}/knowledge`),
-      apiGet<RAGStatus>(`/api/rag/${id}/status`),
-    ]);
-    setKnowledge(nextKnowledge);
-    setStatus(nextStatus);
-  }
+  const loadKnowledge = useCallback(async (id: string) => {
+    if (activeRepoId.current !== id) return;
+    const request = ++knowledgeRequest.current;
+    try {
+      const [nextKnowledge, nextStatus] = await Promise.all([
+        apiGet<KnowledgeItem[]>(`/api/repos/${id}/knowledge`),
+        apiGet<RAGStatus>(`/api/rag/${id}/status`),
+      ]);
+      if (activeRepoId.current !== id || knowledgeRequest.current !== request) return;
+      setKnowledge(nextKnowledge);
+      setStatus(nextStatus);
+    } catch (loadError) {
+      if (activeRepoId.current !== id || knowledgeRequest.current !== request) return;
+      throw loadError;
+    }
+  }, []);
 
   useEffect(() => {
-    loadRepos().catch((loadError) => setError(errorMessage(loadError)));
-  }, []);
+    let cancelled = false;
+    apiGet<Repository[]>("/api/rag/repositories").then((items) => {
+      if (cancelled) return;
+      setRepos(items);
+      selectRepo(items[0]?.id ?? "");
+    }).catch((loadError) => {
+      if (!cancelled) setError(errorMessage(loadError));
+    });
+    return () => {
+      cancelled = true;
+      requestScope.current += 1;
+      knowledgeRequest.current += 1;
+    };
+  }, [selectRepo]);
 
   useEffect(() => {
     if (!repoId) {
@@ -152,9 +188,13 @@ export default function RAGPage() {
       setStatus(null);
       return;
     }
+    let cancelled = false;
     setError(null);
-    loadKnowledge(repoId).catch((loadError) => setError(errorMessage(loadError)));
-  }, [repoId]);
+    loadKnowledge(repoId).catch((loadError) => {
+      if (!cancelled && activeRepoId.current === repoId) setError(errorMessage(loadError));
+    });
+    return () => { cancelled = true; };
+  }, [repoId, loadKnowledge]);
 
   useEffect(() => {
     const node = qaScrollRef.current;
@@ -163,7 +203,8 @@ export default function RAGPage() {
   }, [turns, busy]);
 
   async function uploadFile(file?: File) {
-    if (!file || !repoId) return;
+    if (!file || !repoId || busy) return;
+    const scope = requestScope.current;
     setBusy("upload");
     setError(null);
     setNotice(null);
@@ -171,44 +212,51 @@ export default function RAGPage() {
       const body = new FormData();
       body.append("file", file);
       await apiUpload(`/api/rag/repositories/${repoId}/documents`, body);
+      if (scope !== requestScope.current) return;
       setNotice("文件已提交，正在解析、分段并建立索引");
       await new Promise((resolve) => window.setTimeout(resolve, 900));
       await loadKnowledge(repoId);
     } catch (uploadError) {
-      setError(errorMessage(uploadError));
+      if (scope === requestScope.current) setError(errorMessage(uploadError));
     } finally {
-      setBusy(null);
-      if (fileInput.current) fileInput.current.value = "";
+      if (scope === requestScope.current) {
+        setBusy(null);
+        if (fileInput.current) fileInput.current.value = "";
+      }
     }
   }
 
   async function removeKnowledge(item: KnowledgeItem) {
-    if (!repoId || !window.confirm(`删除“${item.title}”及其全部切片？`)) return;
+    if (!repoId || busy || !window.confirm(`删除“${item.title}”及其全部切片？`)) return;
+    const scope = requestScope.current;
     setBusy(`delete:${item.id}`);
     setError(null);
     try {
       await apiDelete(`/api/rag/repositories/${repoId}/documents/${item.id}`);
       await loadKnowledge(repoId);
+      if (scope !== requestScope.current) return;
       setNotice("资料已从索引中删除");
     } catch (deleteError) {
-      setError(errorMessage(deleteError));
+      if (scope === requestScope.current) setError(errorMessage(deleteError));
     } finally {
-      setBusy(null);
+      if (scope === requestScope.current) setBusy(null);
     }
   }
 
   async function reindex() {
-    if (!repoId) return;
+    if (!repoId || busy) return;
+    const scope = requestScope.current;
     setBusy("reindex");
     setError(null);
     try {
       const result = await apiPost<{ indexed_documents: number }>(`/api/rag/${repoId}/reindex`, {});
       await loadKnowledge(repoId);
+      if (scope !== requestScope.current) return;
       setNotice(`已重建 ${result.indexed_documents} 个文档向量`);
     } catch (reindexError) {
-      setError(errorMessage(reindexError));
+      if (scope === requestScope.current) setError(errorMessage(reindexError));
     } finally {
-      setBusy(null);
+      if (scope === requestScope.current) setBusy(null);
     }
   }
 
@@ -219,12 +267,14 @@ export default function RAGPage() {
   async function ask() {
     const prompt = question.trim();
     if (!repoId || !prompt || busy) return;
+    const scope = requestScope.current;
     setTurns((current) => [...current, { id: crypto.randomUUID(), role: "user", content: prompt }]);
     setQuestion("");
     setBusy("ask");
     setError(null);
     try {
       const result = await apiPost<RAGAnswer>(`/api/rag/${repoId}/ask`, { ...queryBody(), question: prompt });
+      if (scope !== requestScope.current) return;
       setSources(result.sources);
       setTurns((current) => [
         ...current,
@@ -238,26 +288,49 @@ export default function RAGPage() {
         },
       ]);
     } catch (askError) {
-      setError(errorMessage(askError));
-      setTurns((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: "请求失败，请检查后端配置后重试。", mode: "no_evidence" }]);
+      if (scope !== requestScope.current) return;
+      const message = errorMessage(askError);
+      setError(message);
+      setSources([]);
+      setTurns((current) => [...current, { id: crypto.randomUUID(), role: "assistant", content: message, mode: "error" }]);
     } finally {
-      setBusy(null);
+      if (scope === requestScope.current) setBusy(null);
     }
   }
 
   async function searchOnly() {
     if (!repoId || !question.trim() || busy) return;
+    const scope = requestScope.current;
     setBusy("search");
     setError(null);
     try {
       const result = await apiPost<RAGSearch>(`/api/rag/${repoId}/search`, queryBody());
+      if (scope !== requestScope.current) return;
       setSources(result.results);
       setNotice(`召回 ${result.result_count} 条证据，耗时 ${result.took_ms} ms`);
     } catch (searchError) {
-      setError(errorMessage(searchError));
+      if (scope === requestScope.current) setError(errorMessage(searchError));
     } finally {
+      if (scope === requestScope.current) setBusy(null);
+    }
+  }
+
+  function refreshKnowledge() {
+    const scope = requestScope.current;
+    if (repoId) void loadKnowledge(repoId).catch((loadError) => {
+      if (scope === requestScope.current) setError(errorMessage(loadError));
+    });
+  }
+
+  function clearConversation() {
+    if (busy === "ask" || busy === "search") {
+      requestScope.current += 1;
       setBusy(null);
     }
+    setTurns([]);
+    setSources([]);
+    setError(null);
+    setNotice(null);
   }
 
   return (
@@ -282,11 +355,7 @@ export default function RAGPage() {
           <div className="flex min-w-0 items-center gap-2">
             <select
               value={repoId}
-              onChange={(event) => {
-                setRepoId(event.target.value);
-                setTurns([]);
-                setSources([]);
-              }}
+              onChange={(event) => selectRepo(event.target.value)}
               className="h-9 min-w-0 max-w-64 rounded-lg border border-line bg-white px-3 text-sm text-ink outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               aria-label="选择项目"
             >
@@ -296,7 +365,7 @@ export default function RAGPage() {
               ))}
             </select>
             {repoId ? <Link href={`/knowledge/${repoId}`} className="hidden h-9 items-center rounded-lg border border-line bg-white px-3 text-sm text-slate-600 transition-colors hover:bg-panel hover:text-ink sm:inline-flex">管理项目知识</Link> : null}
-            <button type="button" onClick={() => repoId && loadKnowledge(repoId)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-600 transition-colors hover:bg-panel hover:text-ink" title="刷新" aria-label="刷新">
+            <button type="button" onClick={refreshKnowledge} className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-white text-slate-600 transition-colors hover:bg-panel hover:text-ink" title="刷新" aria-label="刷新">
               <RefreshCw className="h-4 w-4" />
             </button>
           </div>
@@ -361,7 +430,7 @@ export default function RAGPage() {
         <main className="flex min-h-0 min-w-0 flex-col bg-white">
           <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
             <div className="flex items-center gap-2 text-sm font-semibold tracking-tight text-ink"><Sparkles className="h-4 w-4 text-indigo-600" />问答</div>
-            {turns.length > 0 && <button type="button" onClick={() => { setTurns([]); setSources([]); }} className="text-xs text-slate-500 transition-colors hover:text-ink">清空会话</button>}
+            {turns.length > 0 && <button type="button" onClick={clearConversation} className="text-xs text-slate-500 transition-colors hover:text-ink">清空会话</button>}
           </div>
           <div ref={qaScrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5">
             {turns.length === 0 && (
@@ -378,7 +447,7 @@ export default function RAGPage() {
                 </div>
                 {turn.role === "assistant" && (
                   <div className="mt-1.5 flex flex-wrap gap-2 text-[11px] text-slate-500">
-                    <span>{turn.mode === "llm" ? "LLM 生成" : turn.mode === "extractive" ? "证据提取" : "无证据"}</span>
+                    <span>{turn.mode === "error" ? "请求失败" : turn.mode === "direct" ? "实时查询" : turn.mode === "llm" ? "LLM 生成" : turn.mode === "extractive" ? "证据提取" : turn.sourceCount ? "未生成回答" : "无证据"}</span>
                     <span>{turn.sourceCount ?? 0} 个引用</span>
                     {typeof turn.tookMs === "number" && <span>{turn.tookMs} ms</span>}
                   </div>

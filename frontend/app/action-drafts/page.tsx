@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Clock3, FileText, Send, ShieldAlert, X } from "lucide-react";
 
 import { apiGet, apiPost } from "@/lib/api";
@@ -42,30 +42,49 @@ export default function ActionDraftsPage() {
   const [title, setTitle] = useState("发布检查报告");
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const activeRepoId = useRef("");
+  const loadRequest = useRef(0);
 
-  async function load(repo = repoId) {
-    const suffix = repo ? `?repo_id=${repo}` : "";
-    const [draftItems, auditItems] = await Promise.all([
-      apiGet<ActionDraft[]>(`/api/action-drafts${suffix}`),
-      apiGet<AuditLog[]>(`/api/action-drafts/audit-logs${suffix}`).catch(() => [])
-    ]);
-    setDrafts(draftItems);
-    setAudits(auditItems);
-  }
+  const load = useCallback(async (repo = activeRepoId.current) => {
+    const request = ++loadRequest.current;
+    if (!repo) return;
+    setError(null);
+    try {
+      const suffix = `?repo_id=${repo}`;
+      const [draftItems, auditItems] = await Promise.all([
+        apiGet<ActionDraft[]>(`/api/action-drafts${suffix}`),
+        apiGet<AuditLog[]>(`/api/action-drafts/audit-logs${suffix}`).catch(() => [])
+      ]);
+      if (activeRepoId.current !== repo || request !== loadRequest.current) return;
+      setDrafts(draftItems);
+      setAudits(auditItems);
+    } catch (loadError) {
+      if (activeRepoId.current === repo && request === loadRequest.current) setError(loadError instanceof Error ? loadError.message : "加载草稿失败");
+    }
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
     apiGet<Repository[]>("/api/repos")
       .then((items) => {
+        if (cancelled) return;
         setRepos(items);
+        activeRepoId.current = items[0]?.id || "";
         setRepoId(items[0]?.id || "");
         return load(items[0]?.id || "");
       })
-      .catch(() => setRepos([]));
-  }, []);
+      .catch((loadError) => {
+        if (!cancelled) setError(loadError instanceof Error ? loadError.message : "加载仓库失败");
+      });
+    return () => { cancelled = true; activeRepoId.current = ""; loadRequest.current += 1; };
+  }, [load]);
 
   async function createDraft() {
     if (!repoId || !content.trim()) return;
+    const currentRepo = repoId;
     setLoading(true);
+    setError(null);
     try {
       await apiPost<ActionDraft>("/api/action-drafts", {
         repo_id: repoId,
@@ -76,20 +95,27 @@ export default function ActionDraftsPage() {
         risk_level: "medium",
         metadata: { source: "manual_review" }
       });
+      if (activeRepoId.current !== currentRepo) return;
       setContent("");
-      await load();
+      await load(currentRepo);
+    } catch (createError) {
+      if (activeRepoId.current === currentRepo) setError(createError instanceof Error ? createError.message : "创建草稿失败");
     } finally {
-      setLoading(false);
+      if (activeRepoId.current === currentRepo) setLoading(false);
     }
   }
 
   async function changeDraft(id: string, action: "confirm" | "cancel") {
+    const currentRepo = repoId;
     setLoading(true);
+    setError(null);
     try {
       await apiPost(`/api/action-drafts/${id}/${action}`, {});
-      await load();
+      if (activeRepoId.current === currentRepo) await load(currentRepo);
+    } catch (changeError) {
+      if (activeRepoId.current === currentRepo) setError(changeError instanceof Error ? changeError.message : "更新草稿失败");
     } finally {
-      setLoading(false);
+      if (activeRepoId.current === currentRepo) setLoading(false);
     }
   }
 
@@ -100,6 +126,7 @@ export default function ActionDraftsPage() {
   return (
     <>
       <PageTitle title="安全草稿与人工确认" description="Agent 的外部写操作先落成可审查草稿；只有具备批准权限的人确认后，系统才执行并写入审计记录。" />
+      {error && <div role="alert" className="mb-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
       <section className="grid gap-3 sm:grid-cols-3">
         <Summary icon={FileText} label="全部草稿" value={drafts.length} />
@@ -122,8 +149,13 @@ export default function ActionDraftsPage() {
             <select
               className={fieldClass}
               value={repoId}
+              disabled={loading}
               onChange={(event) => {
+                activeRepoId.current = event.target.value;
+                loadRequest.current += 1;
                 setRepoId(event.target.value);
+                setDrafts([]);
+                setAudits([]);
                 void load(event.target.value);
               }}
             >

@@ -76,12 +76,13 @@ async def sync_repository(db: Session, repo: Repository, payload: RepoSyncReques
             pr.created_at = parse_github_datetime(item.get("created_at"))
             pr.updated_at = parse_github_datetime(item.get("updated_at"))
 
-            db.query(PRFile).filter(PRFile.pr_id == pr.id).delete()
             try:
                 files = await list_pull_request_files(repo.owner, repo.name, pr.number, token=token, base_url=base_url)
-            except httpx.HTTPStatusError:
-                files = []
-            for file_item in files:
+            except httpx.HTTPError:
+                files = None
+            if files is not None:
+                db.query(PRFile).filter(PRFile.pr_id == pr.id).delete()
+            for file_item in files or []:
                 db.add(
                     PRFile(
                         pr_id=pr.id,
@@ -92,12 +93,13 @@ async def sync_repository(db: Session, repo: Repository, payload: RepoSyncReques
                         patch=file_item.get("patch"),
                     )
                 )
-            db.query(PRReviewComment).filter(PRReviewComment.pr_id == pr.id).delete()
             try:
                 review_comments = await list_pull_request_review_comments(repo.owner, repo.name, pr.number, token=token, base_url=base_url)
-            except httpx.HTTPStatusError:
-                review_comments = []
-            for comment_item in review_comments:
+            except httpx.HTTPError:
+                review_comments = None
+            if review_comments is not None:
+                db.query(PRReviewComment).filter(PRReviewComment.pr_id == pr.id).delete()
+            for comment_item in review_comments or []:
                 db.add(
                     PRReviewComment(
                         pr_id=pr.id,

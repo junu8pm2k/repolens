@@ -1,13 +1,22 @@
 import hashlib
+import logging
 import math
 import os
 import re
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class EmbeddingUnavailableError(RuntimeError):
+    """The configured embedding model cannot be loaded or used."""
+
 
 def _deterministic_tokens(text: str) -> list[str]:
     lowered = (text or "").lower()
@@ -133,13 +142,33 @@ def _embed_openai_compatible(
 def _local_sentence_transformer(model_name: str, device: str | None) -> Any:
     try:
         from sentence_transformers import SentenceTransformer
+        from sentence_transformers.util import get_device_name
     except ImportError as exc:  # pragma: no cover - optional local dependency
-        raise RuntimeError(
-            "sentence-transformers is not installed; install backend/requirements-local-embedding.txt"
+        raise EmbeddingUnavailableError(
+            "本地 Embedding 依赖未安装，请安装 backend/requirements-local-embedding.txt。"
         ) from exc
 
-    kwargs = {"device": device} if device else {}
-    return SentenceTransformer(model_name, **kwargs)
+    cache_dir = Path(settings.local_embedding_cache_dir).expanduser()
+    if not cache_dir.is_absolute():
+        cache_dir = Path(__file__).resolve().parents[4] / cache_dir
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        resolved_device = device or get_device_name()
+        # Qwen weights default to bfloat16, which is very slow on AVX2 CPUs.
+        model_kwargs = {"dtype": "float32"} if resolved_device.split(":", 1)[0] == "cpu" else {}
+        return SentenceTransformer(
+            model_name,
+            device=resolved_device,
+            cache_folder=str(cache_dir),
+            local_files_only=settings.local_embedding_local_files_only,
+            model_kwargs=model_kwargs,
+        )
+    except Exception as exc:
+        logger.exception("Failed to load local embedding model %s", model_name)
+        raise EmbeddingUnavailableError(
+            "本地 Embedding 模型加载失败。请确认模型已完整下载，并检查 "
+            "LOCAL_EMBEDDING_CACHE_DIR 的读写权限；离线运行时需提前准备完整模型缓存。"
+        ) from exc
 
 
 def _embed_local(
@@ -156,7 +185,7 @@ def _embed_local(
         encode_kwargs["prompt_name"] = "query"
     vectors = model.encode(
         texts,
-        batch_size=32,
+        batch_size=4 if str(getattr(model, "device", "")).startswith("cpu") else 32,
         normalize_embeddings=True,
         convert_to_numpy=True,
         show_progress_bar=False,

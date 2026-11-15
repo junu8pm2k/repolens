@@ -53,22 +53,46 @@ export async function apiPostStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let event = "message";
+  let dataLines: string[] = [];
+  let complete = false;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() ?? "";
-    for (const rawEvent of events) {
-      const lines = rawEvent.split("\n");
-      const event = lines.find((line) => line.startsWith("event: "))?.slice(7) ?? "message";
-      const dataText = lines
-        .filter((line) => line.startsWith("data: "))
-        .map((line) => line.slice(6))
-        .join("\n");
-      if (dataText) onEvent(event, JSON.parse(dataText));
+  function consumeLines(flush: boolean) {
+    while (true) {
+      const end = buffer.search(/[\r\n]/);
+      if (end < 0 || (!flush && buffer[end] === "\r" && end === buffer.length - 1)) return;
+      const line = buffer.slice(0, end);
+      const delimiter = buffer[end] === "\r" && buffer[end + 1] === "\n" ? 2 : 1;
+      buffer = buffer.slice(end + delimiter);
+      if (!line) {
+        const dataText = dataLines.join("\n");
+        if (dataText.trim()) onEvent(event, JSON.parse(dataText));
+        event = "message";
+        dataLines = [];
+      } else if (!line.startsWith(":")) {
+        const colon = line.indexOf(":");
+        const field = colon < 0 ? line : line.slice(0, colon);
+        let value = colon < 0 ? "" : line.slice(colon + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        if (field === "event") event = value || "message";
+        if (field === "data") dataLines.push(value);
+      }
     }
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      consumeLines(done);
+      if (done) {
+        complete = true;
+        break;
+      }
+    }
+  } finally {
+    if (!complete) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 }
 

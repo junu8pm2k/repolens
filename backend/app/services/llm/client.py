@@ -53,16 +53,18 @@ class LLMClient:
         }
         payload.update(prompt_cache_model_kwargs())
         async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json=payload,
-            )
             try:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json=payload,
+                )
                 response.raise_for_status()
-            except httpx.HTTPStatusError:
+                message = response.json()["choices"][0]["message"]
+                content = message.get("content") if isinstance(message, dict) else None
+                return content if isinstance(content, str) else ""
+            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
                 return ""
-            return str(response.json()["choices"][0]["message"].get("content") or "")
 
     async def chat_text_stream(self, system_prompt: str, messages: list[dict[str, str]]) -> AsyncIterator[str]:
         if not self.api_key:

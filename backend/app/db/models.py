@@ -216,7 +216,7 @@ class KnowledgeBaseConfig(Base):
     rerank_model: Mapped[str] = mapped_column(String(240), default="qwen3-rerank")
     top_k: Mapped[int] = mapped_column(Integer, default=3)
     score_threshold_enabled: Mapped[bool] = mapped_column(default=True)
-    score_threshold: Mapped[float] = mapped_column(Float, default=0.8)
+    score_threshold: Mapped[float] = mapped_column(Float, default=0.5)
     chunk_size: Mapped[int] = mapped_column(Integer, default=800)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

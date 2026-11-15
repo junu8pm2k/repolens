@@ -94,25 +94,25 @@ def test_source_policy_separates_rag_and_direct_data(source_type, expected) -> N
     assert should_vectorize(source_type) is (expected == "rag")
 
 
-def test_knowledge_base_defaults_enable_high_score_threshold() -> None:
+def test_knowledge_base_defaults_enable_score_threshold() -> None:
     db = _db_session()
     repo = _repo(db)
 
     config = get_or_create_config(db, repo.id)
 
     assert config.score_threshold_enabled is True
-    assert config.score_threshold == pytest.approx(0.8)
+    assert config.score_threshold == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
-async def test_default_score_threshold_filters_results_below_point_eight(monkeypatch) -> None:
+async def test_default_score_threshold_filters_results_below_point_five(monkeypatch) -> None:
     db = _db_session()
     repo = _repo(db)
     monkeypatch.setattr(
         "app.services.rag.knowledge_base.search_similar_documents",
         lambda *_args, **_kwargs: [
-            {"id": "high-confidence", "score": 0.81},
-            {"id": "low-confidence", "score": 0.79},
+            {"id": "high-confidence", "score": 0.51},
+            {"id": "low-confidence", "score": 0.49},
         ],
     )
 
@@ -126,7 +126,7 @@ async def test_default_score_threshold_filters_results_below_point_eight(monkeyp
 
     assert [item["id"] for item in items] == ["high-confidence"]
     assert trace["score_threshold_enabled"] is True
-    assert trace["score_threshold"] == pytest.approx(0.8)
+    assert trace["score_threshold"] == pytest.approx(0.5)
 
 
 def test_add_documents_only_embeds_rag_sources(monkeypatch) -> None:

@@ -74,6 +74,30 @@ npm run dev
 - API 文档：http://localhost:8000/docs
 - 前端：http://localhost:3000
 
+### Windows 一键启动前后端
+
+安装上述 Python、前端依赖并配置根目录 `.env` 后，在 PowerShell 7.4 或更高版本执行：
+
+```powershell
+.\scripts\start_rag.ps1
+```
+
+脚本正常启动 FastAPI 和 Next.js，遵循后端 `.env` 配置，不会禁用 Milvus、LLM、RAGAS 或自动同步，也不会切换 SQLite、写入演示数据或修改知识库阈值。使用本地 Qwen Embedding 时仍需安装 `backend/requirements-local-embedding.txt`。运行环境变量和 `backend/.env` 的优先级遵循后端设置；旧脚本遗留的整套演示环境变量会在后端子进程中清除。
+
+如果还需要启动本项目 Docker Compose 中的 PostgreSQL、etcd、MinIO 和 Milvus，先打开 Docker Desktop，然后执行：
+
+```powershell
+.\scripts\start_rag.ps1 -StartInfrastructure
+```
+
+也可用 `-BackendPort 8001 -FrontendPort 3001` 自定义端口，前端 API 地址会同步更新。端口已占用时脚本会报错退出，不会把已有服务误认为新启动的服务。日志保存在 `.data/repolens-*.log`，停止前后端使用：
+
+```powershell
+.\scripts\stop_rag.ps1
+```
+
+停止脚本会校验进程启动时间并结束整个进程树，重复执行也不会报找不到 PID；Docker 基础设施保持运行。如果终端已经位于 `scripts` 目录，使用 `.\start_rag.ps1` 和 `.\stop_rag.ps1`。
+
 ## RAG 知识问答系统
 
 项目内置了与第 7.1 节流程一一对应的完整 RAG 系统：知识库创建向导、文档解析、段落感知切片、Embedding、向量/关键词混合检索、重排、召回测试、问答工作室、上下文组装、基于证据生成和编号引用。支持 TXT、Markdown、PDF、DOCX、JSON、CSV 与日志文件；重复文件会按 SHA-256 跳过。
@@ -84,15 +108,17 @@ npm run dev
 
 从旧版本升级后，请对每个知识库调用一次 `POST /api/rag/{repo_id}/reindex`。重建会按新边界清理历史向量和旧会话 Document；只部署代码不会主动删除已有索引。
 
-如果只想先验证页面、结构化数据和无模型兜底回答，Windows 本地可以用下面的脚本启动 SQLite 演示环境：
+Windows 可使用上面的“一键启动前后端”脚本，按 `.env` 配置运行完整服务。向量召回、混合检索和重建索引需要 PostgreSQL、etcd、MinIO 和 Milvus 正常运行。
 
-```powershell
-.\scripts\start_rag.ps1
-```
+知识库默认选择 `Qwen/Qwen3-Embedding-0.6B` 与 `qwen3-rerank`。安装 `backend/requirements-local-embedding.txt` 后可运行本地 Qwen Embedding；配置 `DASHSCOPE_API_KEY`、`RERANK_BASE_URL` 后可切换百炼 `text-embedding-v4` 与 `qwen3-rerank`。默认 Embedding 依赖缺失时系统会明确报错，不会静默改用另一套向量空间。启动脚本默认使用已配置的 `LLM_API_KEY`，无需再传 `-UseConfiguredLLM`（该参数保留兼容旧命令）。
 
-脚本会关闭 Milvus，使用 deterministic embedding 和启发式重排，并停用演示知识库的 `0.8` 分数阈值，避免只有关键词分支时全部候选都被过滤。因此它可以验证页面、上传解析、关系库存储、Hybrid 的关键词分支和引用展示，但向量检索状态会明确显示 `degraded`，不能用来证明完整 RAG 已经跑通。要验证向量召回、混合检索和重建索引，仍需先按“快速开始”启动 PostgreSQL、etcd、MinIO 和 Milvus。
+本地 Embedding 模型默认缓存到项目根目录下的 `.data/huggingface/hub`，可通过 `LOCAL_EMBEDDING_CACHE_DIR` 指定其他可读写目录。完整下载模型后，可设置 `LOCAL_EMBEDDING_LOCAL_FILES_ONLY=true` 离线加载，避免问答时访问 Hugging Face。模型依赖缺失、下载不完整或缓存权限不足时，API 返回带有具体提示的 503 响应，页面会显示请求失败原因。
 
-知识库默认选择 `Qwen/Qwen3-Embedding-0.6B` 与 `qwen3-rerank`。安装 `backend/requirements-local-embedding.txt` 后可运行本地 Qwen Embedding；配置 `DASHSCOPE_API_KEY`、`RERANK_BASE_URL` 后可切换百炼 `text-embedding-v4` 与 `qwen3-rerank`。默认 Embedding 依赖缺失时系统会明确报错，不会在生产配置下静默改用另一套向量空间；只有上面的本地演示脚本会显式选择 deterministic embedding。已经配置 `LLM_API_KEY` 时，可用 `.\scripts\start_rag.ps1 -UseConfiguredLLM` 启用模型生成。
+CPU 推理使用 float32 和小批次，避免 Qwen 默认 bfloat16 或大批次填充在部分 CPU 上运行缓慢。重建索引在工作线程执行，健康检查和其他请求仍可响应。询问“这个项目是干什么的”等项目概览问题时，本地召回会结合当前选择的仓库名称，重排及生成保留用户原问题；回答仍须通过证据分数门槛。
+
+新知识库的默认分数门槛为 `0.5`，可在知识库检索设置中调整。门槛应结合当前检索及重排模型的实际分数设置；例如相关性分数为 `0.57` 的资料会被 `0.8` 门槛过滤。全部候选被过滤时，回答会明确显示候选数量、最高分和当前门槛，而非笼统提示资料不足。已有知识库保留各自配置。
+
+仓库实时事实不从历史文档推测：询问“最近一次 commit 是什么时候”等问题时，直接读取所选仓库本地 checkout 的 Git HEAD，返回提交时间（北京时间）、分支、哈希、作者及来源，并明确本地查询范围；不会自动拉取远端。文档冲突检查仅比较与问题相关、同一陈述和相同分支/版本范围的相反结论，避免把不同功能的“允许/禁止”“成功/失败”混判为冲突。
 
 RAG API：
 

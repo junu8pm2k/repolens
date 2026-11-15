@@ -1,4 +1,5 @@
 import importlib.util
+import asyncio
 import time
 import uuid
 from datetime import datetime, timezone
@@ -8,9 +9,9 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import KnowledgeBaseConfig, RetrievalTestRun
+from app.db.models import KnowledgeBaseConfig, Repository, RetrievalTestRun
 from app.services.context_compression import compress_retrieval_results, estimate_tokens
-from app.services.rag.answer_gate import evaluate_answer_gate
+from app.services.rag.answer_gate import evaluate_answer_gate, is_repository_overview_query
 from app.services.rag.embeddings import (
     embed_knowledge_query,
     embedding_contract,
@@ -231,6 +232,13 @@ async def retrieve_knowledge(
 ) -> tuple[list[dict[str, Any]], dict[str, Any], int]:
     started = time.perf_counter()
     config = get_or_create_config(db, repo_id)
+    repository_name = None
+    retrieval_query = query
+    if is_repository_overview_query(query):
+        repository = db.get(Repository, as_uuid(repo_id))
+        if repository is not None:
+            repository_name = repository.name
+            retrieval_query = f"{repository_name} 项目的用途、定位和核心功能是什么？"
     resolved_top_k = min(max(top_k or config.top_k, 1), 20)
     method = retrieval_method or config.retrieval_method
     use_rerank = config.rerank_enabled if rerank_enabled is None else rerank_enabled
@@ -244,8 +252,9 @@ async def retrieve_knowledge(
     )
     query_embedding = None
     if method in {"vector", "hybrid"} and has_vector_sources:
-        query_embedding = embed_knowledge_query(
-            query,
+        query_embedding = await asyncio.to_thread(
+            embed_knowledge_query,
+            retrieval_query,
             provider=config.embedding_provider,
             model=config.embedding_model,
             dimensions=config.embedding_dimensions,
@@ -255,7 +264,7 @@ async def retrieve_knowledge(
     items = search_similar_documents(
         db,
         repo_id,
-        query,
+        retrieval_query,
         limit=candidate_limit,
         query_embedding=query_embedding,
         retrieval_method=method,
@@ -300,8 +309,10 @@ async def retrieve_knowledge(
     pipeline_trace["stages"].append(parent_stage)
 
     before_threshold = len(items)
+    top_candidate_score = max((float(item.get("score") or 0.0) for item in items), default=0.0)
     if threshold_on:
         items = [item for item in items if float(item.get("score") or 0.0) >= threshold]
+    threshold_rejected_all = threshold_on and before_threshold > 0 and not items
     pipeline_trace["stages"].append(
         {
             "name": "score_threshold",
@@ -309,6 +320,7 @@ async def retrieve_knowledge(
             "threshold": threshold if threshold_on else None,
             "input_count": before_threshold,
             "output_count": len(items),
+            "top_candidate_score": round(top_candidate_score, 4),
         }
     )
 
@@ -336,7 +348,14 @@ async def retrieve_knowledge(
         items,
         score_threshold=threshold,
         threshold_enabled=threshold_on,
+        repository_name=repository_name,
     )
+    if threshold_rejected_all:
+        gate.update(
+            reason="候选证据均未达到回答门槛",
+            candidate_count=before_threshold,
+            top_candidate_score=round(top_candidate_score, 4),
+        )
     for item in items:
         retrieval = dict(item.get("retrieval") or {})
         retrieval["answer_gate"] = gate["decision"]
@@ -346,7 +365,13 @@ async def retrieve_knowledge(
     duration_ms = round((time.perf_counter() - started) * 1000)
     trace = {
         **config_dict(config),
+        "retrieval_method": method,
+        "rerank_enabled": use_rerank,
+        "score_threshold_enabled": threshold_on,
+        "score_threshold": threshold,
         "top_k": resolved_top_k,
+        "retrieval_query": retrieval_query,
+        "repository_name": repository_name,
         "source_types": requested_source_types,
         "filters": {
             "repo_id": str(repo_id),
@@ -359,6 +384,7 @@ async def retrieve_knowledge(
         "answer_gate": gate,
         "pipeline": pipeline_trace,
     }
+    trace["runtime"]["rerank"]["enabled"] = use_rerank
     return items, trace, duration_ms
 
 

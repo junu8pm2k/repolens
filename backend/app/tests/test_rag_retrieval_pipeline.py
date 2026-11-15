@@ -27,6 +27,48 @@ def _repo(db):
     return repo
 
 
+@pytest.mark.asyncio
+async def test_retrieval_trace_reports_effective_per_request_overrides(monkeypatch):
+    db = _db_session()
+    repo = _repo(db)
+    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", lambda *a, **kw: [{"id": "one", "score": 0.2, "snippet": "authentication details"}])
+    items, trace, _ = await retrieve_knowledge(
+        db, repo.id, "authentication", retrieval_method="fulltext", rerank_enabled=False,
+        score_threshold_enabled=False, score_threshold=0.93,
+    )
+    assert items
+    assert trace["retrieval_method"] == "fulltext"
+    assert trace["rerank_enabled"] is False
+    assert trace["runtime"]["rerank"]["enabled"] is False
+    assert trace["score_threshold_enabled"] is False
+    assert trace["score_threshold"] == 0.93
+
+
+@pytest.mark.asyncio
+async def test_query_embedding_does_not_block_other_async_work(monkeypatch):
+    import asyncio
+    import threading
+
+    db = _db_session()
+    repo = _repo(db)
+    started, release = threading.Event(), threading.Event()
+
+    def embed(*args, **kwargs):
+        started.set()
+        release.wait(3)
+        return [0.1]
+
+    monkeypatch.setattr("app.services.rag.knowledge_base.embed_knowledge_query", embed)
+    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", lambda *a, **kw: [])
+    task = asyncio.create_task(retrieve_knowledge(db, repo.id, "authentication"))
+    try:
+        assert await asyncio.to_thread(started.wait, 2)
+        assert not task.done(), "the async loop must run while embedding is still blocked"
+    finally:
+        release.set()
+    await task
+
+
 def _document(db, repo, *, title, content, source_id=None, metadata=None):
     item = Document(
         repo_id=repo.id,

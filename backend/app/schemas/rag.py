@@ -126,7 +126,7 @@ class RAGAnswerResponse(BaseModel):
     answer: str
     sources: list[RAGSourceResponse]
     retrieval_count: int
-    generation_mode: Literal["llm", "extractive", "no_evidence"]
+    generation_mode: Literal["llm", "extractive", "direct", "no_evidence"]
     model: str | None = None
     answer_gate: dict[str, Any] = Field(default_factory=dict)
     retrieval_config: dict[str, Any] = Field(default_factory=dict)

@@ -393,7 +393,7 @@ async def ask_rag(repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = De
 
 
 @router.post("/{repo_id}/reindex", response_model=RAGReindexResponse)
-async def reindex_rag(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> RAGReindexResponse:
+def reindex_rag(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> RAGReindexResponse:
     _repo_or_404(db, repo_id)
     config = get_or_create_config(db, repo_id)
     count = reindex_documents(db, repo_id)

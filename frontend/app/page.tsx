@@ -34,6 +34,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
+import { modelInputDiagnostics } from "@/lib/context-diagnostics";
 import type { Repository } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
 
@@ -709,6 +710,7 @@ function traceItemsFromAgentEvents(events: Array<Record<string, unknown>> = []):
       const preRetrieval = contextRecord(event.pre_retrieval);
       const reasoningRetrieval = contextRecord(event.reasoning_retrieval);
       const enabled = preRetrieval.enabled === true;
+      if (!enabled) return;
       const evidenceCount = contextNumber(preRetrieval.evidence_count);
       const query = contextString(preRetrieval.query);
       const sourceLines = Array.isArray(preRetrieval.sources)
@@ -2977,15 +2979,9 @@ export default function DashboardPage() {
                         ) : (
                           <div className="whitespace-pre-wrap">{item.content}</div>
                         )}
-                        {item.route && (
-                          <div className="mt-3 flex flex-wrap gap-2 border-t border-line pt-2 text-xs text-slate-500">
-                            <span>route: {item.route}</span>
-                            <span>tools: {item.toolCalls?.length ?? 0}</span>
-                            {failedTools.length > 0 && (
-                              <span className="text-rose-600" title={failedToolTitle}>
-                                failed: {failedTools.length}
-                              </span>
-                            )}
+                        {failedTools.length > 0 && (
+                          <div className="mt-3 border-t border-line pt-2 text-xs text-rose-600" title={failedToolTitle}>
+                            有 {failedTools.length} 次工具调用失败，可展开工具调用过程查看详情。
                           </div>
                         )}
                         {item.role === "assistant" && item.compressionStats && Object.keys(item.compressionStats).length > 0 && (
@@ -3287,7 +3283,6 @@ function ContextDiagnostics({
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  const pressure = contextRecord(compressionStats.pressure);
   const rawPressure = contextRecord(compressionStats.raw_history_pressure);
   const microcompact = contextRecord(compressionStats.microcompact);
   const boundary = contextRecord(compressionStats.compact_boundary);
@@ -3295,13 +3290,9 @@ function ContextDiagnostics({
   const historyCoverage = contextRecord(compressionStats.history_coverage);
   const progressivePressure = contextRecord(progressiveCompaction.pressure);
   const runtimeToolContext = contextRecord(contextDiagnostics.runtime_tool_context);
-  const promptCalls = Array.isArray(contextDiagnostics.prompt_calls) ? contextDiagnostics.prompt_calls : [];
-  const latestPromptCall = promptCalls.length > 0 ? contextRecord(promptCalls[promptCalls.length - 1]) : {};
-  const latestUsage = modelUsage.length > 0 ? contextRecord(modelUsage[modelUsage.length - 1]) : {};
-  const stage = contextString(progressivePressure.stage) || contextString(pressure.stage) || "normal";
-  const tokenUsage = contextNumber(progressivePressure.token_usage) || contextNumber(pressure.token_usage);
-  const windowTokens = contextNumber(progressivePressure.effective_window_tokens) || contextNumber(pressure.effective_window_tokens);
-  const remainingTokens = contextNumber(progressivePressure.remaining_tokens) || contextNumber(pressure.remaining_tokens);
+  const input = modelInputDiagnostics(compressionStats, progressiveCompaction, modelUsage, contextDiagnostics);
+  const { stage, windowTokens, remainingTokens, providerUsage, toolSchemaTokens } = input;
+  const tokenUsage = input.inputTokens;
   const utilization = windowTokens > 0 ? Math.min(100, Math.round((tokenUsage / windowTokens) * 100)) : 0;
   const attempted = progressiveCompaction.attempted === true;
   const compacted = progressiveCompaction.compacted === true;
@@ -3310,9 +3301,6 @@ function ContextDiagnostics({
   const microSaved = contextNumber(microcompact.estimated_tokens_saved);
   const rawTokens = contextNumber(progressivePressure.raw_segment_estimated_tokens) || contextNumber(rawPressure.token_usage);
   const assembledTokens = contextNumber(progressivePressure.assembled_context_estimated_tokens) || contextNumber(compressionStats.assembled_prompt_estimated_tokens) || contextNumber(compressionStats.system_context_estimated_tokens);
-  const actualInputTokens = contextNumber(latestUsage.input_tokens);
-  const providerUsage = contextString(latestUsage.source) === "provider";
-  const toolSchemaTokens = contextNumber(latestPromptCall.tool_schema_tokens) || contextNumber(promptBreakdown.tool_schema_tokens);
   const runtimeSaved = contextNumber(runtimeToolContext.estimated_tokens_saved);
   const exactHistory = historyCoverage.complete_and_exact === true;
   const hasBoundary = historyCoverage.has_compaction_boundary === true;
@@ -3328,10 +3316,11 @@ function ContextDiagnostics({
             : "bg-emerald-100 text-emerald-700";
 
   return (
-    <div className="mt-3 border-t border-line pt-3">
+    <div data-testid="context-diagnostics" className="mt-3 border-t border-line pt-3">
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={!collapsed}
         className="flex w-full items-center justify-between gap-3 text-left text-xs text-slate-600"
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -3347,7 +3336,7 @@ function ContextDiagnostics({
         <div className="mt-3 space-y-3 rounded-lg bg-slate-50 p-3">
           <div>
             <div className="flex items-center justify-between text-[11px] text-slate-500">
-              <span>上下文窗口占用</span>
+              <span>最后一次模型输入{providerUsage ? "" : "（估算）"}</span>
               <span>{tokenUsage.toLocaleString()} / {windowTokens.toLocaleString()} tokens</span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
@@ -3357,41 +3346,41 @@ function ContextDiagnostics({
               />
             </div>
             <div className="mt-1 flex justify-between text-[10px] text-slate-400">
-              <span>normal</span>
-              <span>warning</span>
-              <span>auto compact</span>
-              <span>manual</span>
+              <span>低占用</span>
+              <span>接近预算</span>
+              <span>需要压缩</span>
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md bg-line text-xs">
             <div className="bg-white px-3 py-2">
-              <div className="text-slate-400">原始片段</div>
+              <div className="text-slate-400">历史原文估算</div>
               <div className="mt-1 font-semibold text-ink">{rawTokens.toLocaleString()} tokens</div>
             </div>
             <div className="bg-white px-3 py-2">
-              <div className="text-slate-400">组装后上下文</div>
+              <div className="text-slate-400">历史与资料估算</div>
               <div className="mt-1 font-semibold text-ink">{assembledTokens.toLocaleString()} tokens</div>
             </div>
             <div className="bg-white px-3 py-2">
-              <div className="text-slate-400">剩余空间</div>
+              <div className="text-slate-400">本次输入剩余预算</div>
               <div className="mt-1 font-semibold text-ink">{remainingTokens.toLocaleString()} tokens</div>
             </div>
           </div>
 
           <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-semibold text-ink">完整 Prompt 计量</span>
+              <span className="font-semibold text-ink">模型输入计量 · {input.callCount} 次调用</span>
               <span className={providerUsage ? "text-emerald-700" : "text-slate-500"}>
                 {providerUsage ? "供应商实际 usage" : "请求前估算"}
               </span>
             </div>
-            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-slate-500 sm:grid-cols-4">
-              <span>实际输入：{actualInputTokens.toLocaleString()}</span>
-              <span>组装估算：{assembledTokens.toLocaleString()}</span>
+            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2 text-slate-500">
+              <span>{providerUsage ? "实际输入" : "输入估算"}：{tokenUsage.toLocaleString()}</span>
+              <span>完整输入估算：{input.estimatedTokens.toLocaleString()}</span>
               <span>近期历史：{contextNumber(promptBreakdown.recent_history).toLocaleString()}</span>
-              <span>工具 Schema：{toolSchemaTokens.toLocaleString()}</span>
+              <span>工具定义估算：{toolSchemaTokens.toLocaleString()}</span>
             </div>
+            <p className="mt-2 text-[11px] leading-5 text-slate-400">输入包含指令、历史、资料及工具定义；完整输入估算与供应商分词可能不同。窗口占用按最后一次调用计算。</p>
             {runtimeSaved > 0 && (
               <div className="mt-1 text-indigo-600">轮内工具投影节省约 {runtimeSaved.toLocaleString()} tokens，完整结果仍保存在封存转录。</div>
             )}
@@ -3459,6 +3448,7 @@ function contextStageLabel(stage: string): string {
 }
 
 function contextReasonLabel(reason: string): string {
+  if (reason === "narrow_request") return "当前请求无需压缩历史";
   if (reason === "microcompact_sufficient") return "轻量压缩后已经恢复安全余量";
   if (reason === "normal") return "当前上下文仍在安全区";
   if (reason === "warning") return "已经接近阈值，但暂时不需要正式压缩";
@@ -3629,6 +3619,7 @@ function ChatTraceInline({
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={!collapsed}
         className="flex w-full items-center justify-between gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-left text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50"
       >
         <span className="flex min-w-0 items-center gap-2">

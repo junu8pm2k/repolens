@@ -9,6 +9,7 @@ from app.db.models import ChatMessage, ChatSession, Conversation, RecallEvent, R
 from app.db.session import Base
 from app.services.chat_memory import (
     ContextAssembler,
+    EvidenceStore,
     MemoryTools,
     MessageStore,
     ProgressiveContextManager,
@@ -30,6 +31,56 @@ def _scope(db: Session) -> tuple[Repository, Conversation]:
     db.add(conversation)
     db.flush()
     return repo, conversation
+
+
+@pytest.mark.parametrize("question", ["#1Issue题目是什么", "直接输出 Issue #1 标题", "？", "说话", "你好"])
+def test_structured_facts_and_conversation_do_not_prefetch_documents(question, monkeypatch):
+    db = _db()
+    repo, conversation = _scope(db)
+
+    def unexpected_search(*args, **kwargs):
+        pytest.fail("This request should not search unrelated project documents")
+
+    monkeypatch.setattr(EvidenceStore, "search", unexpected_search)
+    assembled = ContextAssembler(db).assemble(repo, conversation, question)
+    assert assembled.evidence == []
+    assert "[Related Evidence]" not in assembled.system_context
+    db.close()
+
+
+def test_document_question_keeps_prefetch_available(monkeypatch):
+    db = _db()
+    repo, conversation = _scope(db)
+    evidence = [{"source_type": "project_doc", "source_id": "manual", "title": "部署手册", "snippet": "使用 Docker Compose 部署。"}]
+    monkeypatch.setattr(EvidenceStore, "search", lambda *args, **kwargs: evidence)
+    assembled = ContextAssembler(db).assemble(repo, conversation, "部署手册对数据库备份有什么要求？")
+    assert assembled.evidence == evidence
+    assert "部署手册" in assembled.system_context
+    db.close()
+
+
+def test_greeting_does_not_reactivate_an_old_investigation():
+    db = _db()
+    repo, conversation = _scope(db)
+    conversation.title = "定位旧 CI 失败"
+    db.add(ChatMessage(repo_id=repo.id, conversation_id=conversation.id, role="assistant", content="旧 CI 排查仍在等待日志。"))
+    db.flush()
+    assembled = ContextAssembler(db).assemble(repo, conversation, "你好")
+    assert assembled.history_messages == []
+    assert "旧 CI" not in assembled.system_context
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_narrow_lookup_does_not_compact_unrelated_chat_history(monkeypatch):
+    db = _db()
+    repo, conversation = _scope(db)
+    manager = ProgressiveContextManager(db)
+    monkeypatch.setattr(manager, "_raw_segment_tokens", lambda *args: 1_000_000)
+    result = await manager.ensure_headroom(repo, conversation, "Issue #1 的标题是什么")
+    assert result["attempted"] is False
+    assert result["reason"] == "narrow_request"
+    db.close()
 
 
 def _message(

@@ -249,7 +249,8 @@ class RagasCollectionsScorer:
             messages.append(AIMessage(content="", tool_calls=ragas_calls))
         for item in tool_observations:
             if isinstance(item, dict):
-                messages.append(ToolMessage(content=str(item.get("content") or "")))
+                visible_content = item.get("visible_content") if "visible_content" in item else item.get("content")
+                messages.append(ToolMessage(content=str(visible_content or "")))
         messages.append(AIMessage(content=response))
         return messages
 
@@ -387,7 +388,11 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
         elif doc.source_type == "workflow_run":
             question = f"What does the CI run {doc.title} show?"
         else:
-            question = f"What project knowledge is available about {doc.title}?"
+            question = (
+                f"请概括项目资料《{doc.title}》这一章节记录的关键事实，给出来源引用，只回答该章节相关内容。"
+                if re.search(r"[\u4e00-\u9fff]", doc.title)
+                else f'Summarize the recorded facts in project knowledge section "{doc.title}" and cite the sources. Focus on that section.'
+            )
         cases.append(
             RagEvalCase(
                 id=f"document-{index}",
@@ -604,6 +609,8 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
     ]
     answer = str(result.get("answer") or "").strip()
     answer_present = bool(answer)
+    completion_status = str((result.get("completion") or {}).get("status") or "")
+    completion_passed = not completion_status or completion_status in {"completed", "completed_with_tool_errors"}
     contexts_present = bool(contexts)
     contexts_required = case.kind != "no_answer"
     refusal_matched = None if contexts_required else bool(_REFUSAL_PATTERN.search(answer))
@@ -617,6 +624,7 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
         and not missing_tools
         and not tool_errors
         and answer_present
+        and completion_passed
         and (contexts_present or not contexts_required)
         and refusal_matched is not False
         and not missing_phrases
@@ -629,6 +637,8 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
         "source_hit": source_hit,
         "missing_sources": missing_sources,
         "answer_present": answer_present,
+        "completion_passed": completion_passed,
+        "completion_status": completion_status or None,
         "contexts_present": contexts_present,
         "contexts_required": contexts_required,
         "refusal_matched": refusal_matched,
@@ -770,6 +780,12 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "action": "重试异常指标；若仍失败，再检查超时、模型结构化输出和答案长度。",
             }
         )
+    if hard.get("completion_passed") is False:
+        diagnoses.append({
+            "category": "agent_execution", "severity": "failed", "title": "Agent 未正常完成任务",
+            "summary": f"工具循环状态为 {hard.get('completion_status') or 'unknown'}；有检索结果不代表已完成回答。",
+            "action": "检查重复或无新增证据的工具调用，基于已有证据收束回答；不要只提高步数预算。",
+        })
     if not hard.get("source_hit", True) or (
         hard.get("contexts_required", True) and not hard.get("contexts_present", True)
     ):
@@ -846,7 +862,7 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "category": "generation_faithfulness",
                 "severity": "failed",
                 "title": "回答没有忠于检索证据",
-                "summary": "回答包含证据无法支持的扩写、推断或错误选择。",
+                "summary": "Judge 判定部分回答断言未得到评分上下文支持；需要逐项核对，分数本身不能定位具体错误事实。",
                 "action": "缩短答案，要求逐项依据证据回答，并加强冲突来源处理。",
             }
         )
@@ -866,8 +882,8 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "category": "agent_goal",
                 "severity": "failed",
                 "title": "ChatAgent 没有完成题目要求",
-                "summary": "回答可能事实相关，但没有遵守句数、格式或任务约束。",
-                "action": "让生成链优先执行用户明确约束，再补充必要解释。",
+                "summary": "Judge 判定最终结果与参考目标不一致；不能仅凭此分数认定存在句数或格式错误。",
+                "action": "对照原题、参考目标与最终回答人工复核；区分真实遗漏、额外扩写和参考目标定义问题。",
             }
         )
     if not diagnoses:

@@ -67,6 +67,29 @@ def _tokens(text: str) -> list[str]:
     return re.findall(r"[a-zA-Z0-9_\-\u4e00-\u9fff]+", text.lower())
 
 
+def pre_retrieval_policy(message: str) -> dict[str, Any]:
+    """Skip document prefetch for conversation and exact structured facts.
+
+    This only controls speculative retrieval. Agent tools remain available when
+    the conversation actually needs a document or a historical record.
+    """
+    text = message.strip().lower()
+    if re.fullmatch(r"(?:你好|您好|hi|hello|hey|谢谢|好的|好)[\s!！?？。.,，]*", text):
+        return {"enabled": False, "reason": "social_message"}
+    conversational = not _tokens(text) or re.fullmatch(
+        r"(?:你好|您好|hi|hello|hey|谢谢|好的|好|说话|说话啊|继续|在吗|不对|什么意思)[\s!！?？。.,，]*", text
+    )
+    recent_recall = re.search(r"刚(?:才|刚)说|上一(?:条消息|句话|句)|my last message|what did i just say", text)
+    record = re.search(r"issue|pull\s*request|\bpr\b|\bci\b|workflow|#\s*\d+|commit", text)
+    field = re.search(r"标题|题目|编号|状态|正文|描述|作者|负责人|链接|title|number|status|state|body|assignee|author|url", text)
+    investigation = re.search(r"历史|相似|关联|分析|排查|根因|为什么|原因|比较|对比|风险|影响|why|history|similar|analy", text)
+    if conversational or recent_recall:
+        return {"enabled": False, "reason": "conversation_or_recent_history"}
+    if record and field and not investigation:
+        return {"enabled": False, "reason": "structured_record_lookup"}
+    return {"enabled": True, "reason": "project_evidence_may_help"}
+
+
 def _clip(text: str, limit: int) -> str:
     text = (text or "").strip()
     return text if len(text) <= limit else text[: max(0, limit - 3)].rstrip() + "..."
@@ -481,9 +504,10 @@ class ContextAssembler:
             .order_by(ChatSession.created_at.desc())
             .first()
         )
-        evidence = EvidenceStore(self.db).search(repo_id, conversation_id, current_message, limit=8)
+        retrieval_policy = pre_retrieval_policy(current_message)
+        evidence = EvidenceStore(self.db).search(repo_id, conversation_id, current_message, limit=8) if retrieval_policy["enabled"] else []
         history_fetch_limit = max(limit, 30)
-        recent = message_store.recent(repo_id, conversation_id, limit=history_fetch_limit)
+        recent = [] if retrieval_policy["reason"] == "social_message" else message_store.recent(repo_id, conversation_id, limit=history_fetch_limit)
         raw_history = [
             {
                 "role": item.role,
@@ -523,7 +547,7 @@ class ContextAssembler:
             system_sections: list[str] = []
             if repo:
                 system_sections.append(f"[Current Repository]\n{repo.full_name}\n[/Current Repository]")
-            if conversation:
+            if conversation and retrieval_policy["enabled"]:
                 system_sections.append(f"[Current Conversation]\n{conversation.title}\n[/Current Conversation]")
 
             sections: list[str] = []
@@ -554,7 +578,7 @@ class ContextAssembler:
                 memory_sections.append(f"[Thread Memory: {memory.sessions_incorporated} sessions]\n{memory_text}\n[/Thread Memory]")
             if latest_session and latest_session.digest:
                 memory_sections.append(f"[Previous Session Digest]\n{latest_session.digest}\n[/Previous Session Digest]")
-            memory_context = clip_to_token_budget("\n\n".join(memory_sections), budget.memory_tokens)
+            memory_context = clip_to_token_budget("\n\n".join(memory_sections), budget.memory_tokens) if retrieval_policy["enabled"] else ""
             if memory_context:
                 sections.append(memory_context)
             if next_evidence:
@@ -635,6 +659,7 @@ class ContextAssembler:
                     "reserved_response": budget.reserved_response_tokens,
                 },
                 "evidence_items": len(evidence),
+                "pre_retrieval": retrieval_policy,
                 "mode": "progressive_budgeted_context",
             },
         )
@@ -648,6 +673,9 @@ class ProgressiveContextManager:
     async def ensure_headroom(self, repo: Repository | None, conversation: Conversation | None, current_message: str) -> dict[str, Any]:
         if repo is None or conversation is None:
             return {"attempted": False, "reason": "no_repo_or_conversation"}
+        policy = pre_retrieval_policy(current_message)
+        if policy["reason"] in {"social_message", "structured_record_lookup"}:
+            return {"attempted": False, "reason": "narrow_request"}
         assembled = ContextAssembler(self.db).assemble(repo, conversation, current_message)
         assembled_pressure = assembled.compression_stats.get("pressure") or {}
         micro_stats = assembled.compression_stats.get("microcompact") or {}

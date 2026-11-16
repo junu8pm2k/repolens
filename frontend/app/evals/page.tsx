@@ -56,6 +56,8 @@ type HardRules = {
   source_hit: boolean;
   missing_sources?: string[];
   answer_present: boolean;
+  completion_passed?: boolean;
+  completion_status?: string | null;
   contexts_present: boolean;
   contexts_required?: boolean;
   refusal_matched?: boolean | null;
@@ -76,6 +78,7 @@ type RagCaseResult = {
   source_file?: string | null;
   expected_source_files?: string[];
   latency_ms: number;
+  completion?: { status?: string; reason?: string; steps?: number };
   retrieved_contexts: string[];
   retrieved_sources: RetrievedSource[];
   tool_calls: ToolCall[];
@@ -210,7 +213,8 @@ const DIAGNOSIS_LABELS: Record<string, string> = {
   generation: "硬规则失败",
   generation_faithfulness: "回答缺少依据",
   generation_relevancy: "回答不够直接",
-  agent_goal: "任务未完成"
+  agent_goal: "任务未完成",
+  agent_execution: "Agent 循环未完成"
 };
 
 export default function EvalsPage() {
@@ -315,6 +319,7 @@ export default function EvalsPage() {
   const status = result?.result.status || result?.status;
   const active = ACTIVE_STATUSES.has(status || "");
   const cases = result?.result.cases || [];
+  const unfinishedCases = cases.filter((item) => item.completion?.status && !["completed", "completed_with_tool_errors"].includes(item.completion.status));
   const metricRows = useMemo(() => {
     const details = result?.result.ragas?.metrics || {};
     return METRICS.map((item) => ({ ...item, detail: details[item.key] }));
@@ -508,6 +513,12 @@ export default function EvalsPage() {
             <ProgressPanel progress={result.result.progress} runMode={result.result.run_mode} />
           ) : result ? (
             <>
+              {unfinishedCases.length > 0 && (
+                <div role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <div className="font-semibold">{unfinishedCases.length}/{cases.length} 条 Agent 任务未正常完成</div>
+                  <div className="mt-1 text-xs leading-5">请先查看逐题工具循环状态与最终回答。{result.result.hard_gate?.passed ? "这份历史记录的硬规则未检查完成状态，Hard Gate 100% 不能代表任务已完成；新评测已补上此校验。" : "预算耗尽、循环中止和部分完成均会使完成状态硬规则失败。"}</div>
+                </div>
+              )}
               {result.result.ragas?.error && (
                 <div className="mt-4 flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -528,7 +539,7 @@ export default function EvalsPage() {
                 {metricRows.map((metric) => <MetricCard key={metric.key} label={metric.label} description={metric.description} detail={metric.detail} />)}
                 <MetricCard
                   label="Hard Gate"
-                  description="来源命中、关键事实、输出格式和工具错误"
+                  description="任务完成、来源命中、关键事实、输出格式和工具错误"
                   detail={{
                     score: result.result.hard_gate?.pass_rate ?? null,
                     threshold: 1,
@@ -773,6 +784,7 @@ function HardRulePanel({ hard, expectedSources }: { hard: HardRules; expectedSou
     ["输出格式符合要求", hard.answer_pattern_matched !== false],
     ["工具无错误", !(hard.tool_errors || []).length]
   ] satisfies [string, boolean][];
+  if (hard.completion_passed !== undefined) rows.unshift(["Agent 正常完成", hard.completion_passed]);
   if (hard.contexts_required === false) {
     rows.unshift(["明确说明证据不足", hard.refusal_matched === true]);
   } else {

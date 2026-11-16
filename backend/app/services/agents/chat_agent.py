@@ -1,13 +1,16 @@
 import json
+import hashlib
 import re
+from functools import lru_cache
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal, TypedDict
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import StructuredTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.core.config import settings
 from app.services.agents.base import BaseAgent
@@ -39,6 +42,9 @@ class GenericToolArgs(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     message: str | None = Field(default=None, description="原始用户消息")
+    issue_id: str | None = Field(default=None, description="需要读取或分析的 Issue UUID")
+    number: int | None = Field(default=None, description="Issue 编号，例如 #1 传 1")
+    run_id: str | None = Field(default=None, description="需要分析的 Workflow Run UUID")
     query: str | None = Field(default=None, description="搜索查询")
     keyword: str | None = Field(default=None, description="关键词过滤")
     limit: int | None = Field(default=None, description="结果数量上限")
@@ -57,6 +63,40 @@ class GenericToolArgs(BaseModel):
     pattern: str | None = Field(default=None, description="文本或 glob 模式")
     start_line: int | None = Field(default=None, description="读取文件时从第几行开始，行号从 1 开始")
     line_count: int | None = Field(default=None, description="最多读取多少行")
+    fields: list[str] | None = Field(default=None, description="只读取需要的 Issue 字段；只查标题时传 [title]。可选 id, number, title, body, state, labels, author, assignees")
+    pr_id: str | None = Field(default=None, description="PR UUID")
+
+
+TOOL_ARGUMENT_FIELDS = {
+    "workspace.list_files": ("path", "pattern", "limit"),
+    "workspace.read_file": ("path", "start_line", "line_count"),
+    "workspace.search_code": ("query", "path", "limit"),
+    "repo_health.generate_summary": (),
+    "repo.get_issue": ("number", "issue_id", "fields"),
+    "issue_agent.analyze_issue": ("number", "issue_id"),
+    "pr_review_agent.analyze_pr": ("pr_id",),
+    "ci_debug_agent.analyze_workflow_run": ("run_id",),
+    "rag.search_similar_documents": ("query", "limit"),
+    "report_agent.generate_weekly_report": ("message",),
+    "safety_agent.classify_action_risk": ("message",),
+    "workflow.run_engineering_review": ("message",),
+    "repolens_search_evidence": ("query", "limit"),
+    "repolens_get_thread_context": ("message_id", "before_message_id", "after_message_id", "offset", "max_chars", "limit"),
+    "repolens_read_session_events": ("session_id", "query", "include_transcript", "limit"),
+}
+
+
+@lru_cache(maxsize=64)
+def tool_argument_schema(name: str) -> type[BaseModel]:
+    names = TOOL_ARGUMENT_FIELDS.get(name)
+    if names is None:
+        return GenericToolArgs
+    fields = {key: (GenericToolArgs.model_fields[key].annotation, GenericToolArgs.model_fields[key]) for key in names}
+    return create_model(
+        re.sub(r"\W", "_", name) + "Args",
+        __config__=ConfigDict(extra="allow"),
+        **fields,
+    )
 
 
 class ConversationState(TypedDict, total=False):
@@ -81,6 +121,7 @@ class ConversationState(TypedDict, total=False):
     prompt_diagnostics: list[dict[str, Any]]
     runtime_context_stats: dict[str, Any]
     context_overflow_recovery_attempted: bool
+    evidence_progress: dict[str, Any]
 
 
 class ChatAgent(BaseAgent):
@@ -94,6 +135,7 @@ class ChatAgent(BaseAgent):
         "workspace.read_file",
         "workspace.search_code",
         "repo_health.generate_summary",
+        "repo.get_issue",
         "rag.search_similar_documents",
         "issue_agent.analyze_issue",
         "pr_review_agent.analyze_pr",
@@ -105,6 +147,7 @@ class ChatAgent(BaseAgent):
 
     max_steps = 12
     max_repeated_tool_calls = 2
+    max_stagnant_observations = 3
     tool_retry_attempts = 1
 
     def __init__(self, model: ChatOpenAI | None = None) -> None:
@@ -220,7 +263,8 @@ class ChatAgent(BaseAgent):
                 activation_event,
             )
         prefetched_evidence = context.get("evidence") if isinstance(context.get("evidence"), list) else []
-        pre_retrieval_enabled = "evidence" in context
+        retrieval_policy = (context.get("compression_stats") or {}).get("pre_retrieval") or {}
+        pre_retrieval_enabled = bool(retrieval_policy.get("enabled", "evidence" in context))
         reasoning_retrieval_enabled = "rag.search_similar_documents" in raw_tools
         pre_retrieval_sources = [
             {
@@ -239,6 +283,7 @@ class ChatAgent(BaseAgent):
                 "mode": "hybrid_rag" if pre_retrieval_enabled and reasoning_retrieval_enabled else "tool_calling",
                 "pre_retrieval": {
                     "enabled": pre_retrieval_enabled,
+                    "reason": retrieval_policy.get("reason"),
                     "evidence_count": len(prefetched_evidence),
                     "query": message,
                     "sources": pre_retrieval_sources,
@@ -254,12 +299,13 @@ class ChatAgent(BaseAgent):
         memory_policy = self._memory_context_policy(message, context)
         if memory_policy:
             self._append_agent_event(state, "context_policy", memory_policy)
-        if memory_policy and memory_policy.get("mode") == "direct_recent_history":
+        direct_chat = retrieval_policy.get("reason") == "social_message" and self.model is not None
+        if direct_chat or (memory_policy and memory_policy.get("mode") == "direct_recent_history"):
             state["final_answer"] = await self._direct_answer_from_recent_history(state)
             answer = str(state.get("final_answer") or "").strip()
             if not answer:
                 answer = self._local_recent_history_answer(state)
-            self._stop_loop(state, "recent_history_available", "completed")
+            self._stop_loop(state, "social_message" if direct_chat else "recent_history_available", "completed")
             self._record_skill_validation(state)
             async for chunk in self._stream_answer(answer):
                 yield chunk
@@ -399,6 +445,7 @@ class ChatAgent(BaseAgent):
         graph.add_node("model_decision", model_decision_node)
         graph.add_node("tool_action", self._graph_tool_action)
         graph.add_node("max_steps_stop", self._graph_max_steps_stop)
+        graph.add_node("stalled_stop", self._graph_stalled_stop)
         graph.add_edge(START, "model_decision")
         graph.add_conditional_edges(
             "model_decision",
@@ -408,9 +455,10 @@ class ChatAgent(BaseAgent):
         graph.add_conditional_edges(
             "tool_action",
             self._route_after_tool_action,
-            {"tools": "tool_action", "model": "model_decision", "limit": "max_steps_stop"},
+            {"tools": "tool_action", "model": "model_decision", "limit": "max_steps_stop", "stalled": "stalled_stop", "end": END},
         )
         graph.add_edge("max_steps_stop", END)
+        graph.add_edge("stalled_stop", END)
         return graph.compile(name="chat_agent_tool_calling_graph")
 
     async def _stream_agent_graph(self, graph: Any, state: ConversationState) -> AsyncIterator[dict[str, Any]]:
@@ -504,8 +552,8 @@ class ChatAgent(BaseAgent):
                 next_state["pending_tool_calls"] = []
                 next_state["route"] = "tool_loop_guard"
                 next_state["final_answer"] = (
-                    "我停止了这轮 Agent Loop，因为模型连续请求相同工具和参数，"
-                    "继续执行只会重复消耗预算。请根据已有工具结果调整问题，或让我换一种检索/分析路径。"
+                    await self._final_from_observations(next_state)
+                    or self._local_observation_answer(next_state)
                 )
                 next_state["observations"] = [
                     *(next_state.get("observations") or []),
@@ -547,14 +595,37 @@ class ChatAgent(BaseAgent):
             self._event("action", {"tool_name": public_action, "arguments": action_input}),
             self._event("observation", {"tool_name": public_action, "content": observation}),
         ]
+        exact_value = self._requested_record_value(str(next_state.get("message") or ""), public_action, observation)
+        if exact_value is not None:
+            next_state["final_answer"] = exact_value
+            next_state["pending_tool_calls"] = []
+            self._stop_loop(next_state, "requested_field_returned", "completed")
         return self._graph_state_update(next_state, stream_events)
+
+    def _requested_record_value(self, message: str, tool_name: str, observation: dict[str, Any]) -> str | None:
+        """Honor explicit single-field output requests using authoritative data."""
+        if tool_name != "repo.get_issue" or observation.get("route") != "issue_detail":
+            return None
+        match = re.search(
+            r"(?:只(?:要|输出|返回)|仅(?:输出|返回)|直接输出)\s*(?:issue\s*)?(?:#\s*(\d+))?\s*的?\s*"
+            r"(标题|题目|title|状态|state|编号|number|作者|author)\s*[?？。.!！\s]*$",
+            message, flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        identity = observation.get("record_identity") or {}
+        if match.group(1) and str(identity.get("number")) != match.group(1):
+            return None
+        field = {"标题": "title", "题目": "title", "状态": "state", "编号": "number", "作者": "author"}.get(match.group(2).lower(), match.group(2).lower())
+        value = (observation.get("record_fields") or {}).get(field)
+        return str(value) if value is not None else None
 
     async def _graph_max_steps_stop(self, state: ConversationState) -> dict[str, Any]:
         next_state: ConversationState = dict(state)
         next_state["route"] = "tool_loop_budget_exhausted"
         next_state["final_answer"] = (
-            "这轮 Agent Loop 已达到步骤预算上限。下面的结论只能基于已经完成的工具调用和观察结果，"
-            "如果还需要继续，我会从当前证据继续缩小范围。"
+            await self._final_from_observations(next_state)
+            or self._local_observation_answer(next_state)
         )
         self._stop_loop(next_state, "max_steps_exhausted", "budget_exhausted", {"max_steps": self.max_steps})
         return self._graph_state_update(next_state, [])
@@ -562,9 +633,23 @@ class ChatAgent(BaseAgent):
     def _route_after_model_decision(self, state: ConversationState) -> str:
         return "tools" if state.get("pending_tool_calls") else "end"
 
+    async def _graph_stalled_stop(self, state: ConversationState) -> dict[str, Any]:
+        next_state: ConversationState = dict(state)
+        next_state["route"] = "evidence_synthesis"
+        next_state["final_answer"] = (
+            await self._final_from_observations(next_state)
+            or self._local_observation_answer(next_state)
+        )
+        self._stop_loop(next_state, "no_new_evidence", "partial")
+        return self._graph_state_update(next_state, [])
+
     def _route_after_tool_action(self, state: ConversationState) -> str:
+        if state.get("final_answer"):
+            return "end"
         if state.get("pending_tool_calls"):
             return "tools"
+        if int((state.get("evidence_progress") or {}).get("stagnant_observations") or 0) >= self.max_stagnant_observations:
+            return "stalled"
         if int(state.get("step") or 0) >= self.max_steps and not str(state.get("final_answer") or "").strip():
             return "limit"
         return "model"
@@ -587,6 +672,7 @@ class ChatAgent(BaseAgent):
             "prompt_diagnostics",
             "runtime_context_stats",
             "context_overflow_recovery_attempted",
+            "evidence_progress",
         ]
         update = {key: state[key] for key in keys if key in state}
         update["stream_events"] = stream_events
@@ -810,14 +896,17 @@ class ChatAgent(BaseAgent):
                 if observation.get("retryable") is not None:
                     call.setdefault("retryable", observation.get("retryable"))
                 call.update(self._skill_event_metadata(str(call.get("tool_name") or public_action), state))
+        summary = self._summarize_observation(observation)
         self._capture_evaluation_observation(
             state,
             tool_name=public_action,
             arguments=action_input,
             observation=observation,
+            visible_content=str(summary.get("answer_preview") or ""),
         )
-        summary = self._summarize_observation(observation)
         status = "error" if any(call.get("status") == "error" for call in observation.get("tool_calls", []) if isinstance(call, dict)) else "success"
+        if status == "success":
+            self._record_evidence_progress(state, public_action, action_input, str(summary.get("answer_preview") or ""))
         tool_result_event = self._append_agent_event(
             state,
             "tool_result",
@@ -851,6 +940,27 @@ class ChatAgent(BaseAgent):
             tool_call_id=tool_use_id,
         )
         return summary, tool_message, tool_result_event
+
+    def _record_evidence_progress(self, state: ConversationState, tool_name: str, arguments: dict[str, Any], content: str) -> None:
+        """Detect overlapping reads using the text exposed to the model."""
+        progress = dict(state.get("evidence_progress") or {})
+        seen = set(progress.get("seen_results") or [])
+        lines_by_path = dict(progress.get("workspace_lines") or {})
+        visible_lines = re.findall(r"(?m)^(\d+):[ \t]*(.*)$", content) if tool_name == "workspace.read_file" else []
+        if visible_lines:
+            path = str(arguments.get("path") or "").replace("\\", "/").removeprefix("./")
+            known_lines = dict(lines_by_path.get(path) or {})
+            novel = any(known_lines.get(number) != text for number, text in visible_lines)
+            known_lines.update(dict(visible_lines))
+            lines_by_path[path] = known_lines
+        else:
+            digest = hashlib.sha256(f"{tool_name}\n{content}".encode("utf-8")).hexdigest()
+            novel = bool(content.strip()) and digest not in seen
+            seen.add(digest)
+        progress["seen_results"] = sorted(seen)
+        progress["workspace_lines"] = lines_by_path
+        progress["stagnant_observations"] = 0 if novel else int(progress.get("stagnant_observations") or 0) + 1
+        state["evidence_progress"] = progress
 
     async def _invoke_tool_with_recovery(
         self,
@@ -949,18 +1059,31 @@ class ChatAgent(BaseAgent):
 
     def _tool_calling_system_prompt(self) -> str:
         return (
-            "你是 RepoLens AI 的对话控制器。这个稳定前缀会被缓存。"
-            "请像长任务软件 Agent 一样工作：先规划，调用工具，读取 tool_result 观察结果，修正计划，"
-            "持续推进直到用户请求真正完成，或步骤预算耗尽。"
+            "你是 RepoLens AI，直接与用户对话。以最新一条用户消息为本轮任务，历史只用于理解指代。"
+            "用户追问、纠正、质疑或催促时，先回应当前诉求，不自动继续历史调查；"
+            "例如用户说‘？’或‘说话’，应简短澄清或纠正上一条答复，不重新跑 CI 或 RAG。"
+            "这类质疑或催促最多回复三句话，不列清单、表格、状态字段或后续选项。"
+            "只有完成当前请求确实需要外部事实时才调用工具，读到所需事实后立即回答。"
+            "用户要求只输出标题、编号或一句话时，严格遵守，不附报告、表格、负责人或下一步。"
+            "出现‘直接输出’或‘只输出’时，以后面的输出要求为准，省略前面的是非确认和解释。"
             "当需要仓库、记忆、工作区代码或写操作安全上下文时，使用原生工具调用。"
             "绝不要编造工具结果。"
+            "Issue 标题、正文、状态、编号等精确事实优先用 repo.get_issue 读取同步数据库，"
+            "查询单一字段时 fields 只包含该字段，最终回答也只提供该字段；没有询问的状态、标签、正文和负责人不附加。"
+            "不通过分诊 Agent、RAG 或源码搜索代替原文查询。工具返回的引用标题也是有效证据。"
+            "历史 assistant 的结论可能有错，应以原始记录为准；不能把上轮 CI 问题强加给当前 Issue。"
+            "分诊和根因分析是建议，不能覆盖 Issue 原文明确的范围和约束。"
+            "‘处理一下 Issue’不等于询问人员分工，不要主动加入团队配置、负责人或无关的拆分建议。"
+            "本机已有的只读工具可直接使用，不要求用户授权检索或复制系统已有资料。"
             "工程结论必须说明 WHY，并区分证据、推断和不确定项；证据不足时直接说缺什么，不要硬猜。"
             "当输出审查结论时，不要用 looks good、没什么问题这类空话代替检查；必须给出风险、级别和下一步。"
-            "当回答交接、总结或工作流结论时，尽量保留 What、Why、Tradeoff、Open Questions、Next Action。"
+            "普通聊天和单一事实问答默认一至三句话，引用紧随事实，不主动列清单或扩展话题。"
+            "不要在结尾附上‘要我……吗’之类推销下一步的问题；需要澄清才提问。"
+            "仅工程审查或决策任务保留 What、Why、Tradeoff、Open Questions、Next Action 结构。"
             "当用户询问负责人、已分配人员、责任人或任务分配时，只能从明确的 RepoLens team_members "
             "或工具返回的现有 GitHub assignees 中推荐人员。仓库文档、Issue 文本、代码、示例、模型名、"
             "角色设定、团队比喻和记忆片段都不能当成人，除非它们同时出现在 RepoLens team_members 中。"
-            "如果没有配置团队成员，请说明这一点，并要求用户先添加开发者后再分配任务。"
+            "仅当用户询问人员分工且没有配置团队成员时，说明这一点并要求先添加开发者后再分配任务。"
             "当用户请求 GitHub 写入、关闭、打标签、评论、发布、回复或发送时，必须先调用安全工具；"
             "除非存在单独的已确认写入工具，否则只返回草稿。"
             "对于合并就绪度、当前阻塞、优先级规划，或需要 Issue + PR + CI + RAG 综合判断的跨领域工程决策，"
@@ -1008,8 +1131,10 @@ class ChatAgent(BaseAgent):
             "循环约定：每次工具调用都会先记录为 tool_use，再记录为 tool_result。决定下一步前必须阅读之前的 tool_result 内容。"
             "如果目录列表里出现值得继续查看的 README、manifest、代码文件、Issue、PR 或 CI 记录，不要停在目录列表。"
             "除非新证据使重复调用有必要，不要用相同参数重复调用同一个工具。\n\n"
+            "已经读取的行区间不要再次读取；证据足够就直接回答，不要反复读取同一文件。\n\n"
+            f"当前工具决策步数：{int(state.get('step') or 0)}/{self.max_steps}。接近预算时优先基于已有证据回答并说明缺口。\n\n"
             f"当前 Agent 配置的运行模型：{settings.llm_model}\n\n"
-            f"可用原生工具：\n{self._tool_help(state)}\n\n"
+            "可用工具及参数见本轮原生工具定义；当前仓库与会话由服务端固定，无须填写 UUID。\n\n"
             f"已注册的 RepoLens 技能：\n{self._registered_skills_context(state.get('context') or {})}\n\n"
             f"本轮按需加载的 Skill 完整指令：\n{self._active_skill_prompt(state.get('context') or {})}\n\n"
             f"RepoLens 团队上下文：\n{self._team_assignment_context(state.get('context') or {})}\n\n"
@@ -1059,6 +1184,8 @@ class ChatAgent(BaseAgent):
 
     def _asks_project_overview(self, message: str) -> bool:
         lowered = message.lower()
+        if re.search(r"(?:knowledge|documentation|document|section|chapter|manual)\s+(?:is\s+available\s+)?(?:about|for|on)|文档|章节|[《「].+[》」]| · ", lowered):
+            return False
         if any(token in lowered for token in ["issue", "pull request", "pr #", "ci", "未关闭", "待处理"]):
             return False
         return any(
@@ -1185,6 +1312,8 @@ class ChatAgent(BaseAgent):
         if self.model is None:
             return self._local_recent_history_answer(state)
         history = self._history_messages(state.get("context") or {})
+        direct_chat = ((state.get("context") or {}).get("compression_stats") or {}).get("pre_retrieval", {}).get("reason") == "social_message"
+        phase = "direct_chat" if direct_chat else "direct_recent_history"
         try:
             system_prompt = (
                 "请直接根据提供的近期原始消息回答，不要声称调用了任何工具。"
@@ -1195,9 +1324,12 @@ class ChatAgent(BaseAgent):
                 f"近期原始消息：{json.dumps(history, ensure_ascii=False)}\n"
                 f"当前用户问题：{state.get('message') or ''}"
             )
+            if direct_chat:
+                system_prompt = "你是 RepoLens AI。自然、简短地回应用户当前这句闲聊；无需介绍功能、回顾旧任务或列举后续选项。"
+                user_prompt = str(state.get("message") or "")
             estimated = self._record_prompt_diagnostics(
                 state,
-                phase="direct_recent_history",
+                phase=phase,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
@@ -1207,7 +1339,7 @@ class ChatAgent(BaseAgent):
             self._record_model_usage(
                 state,
                 response,
-                phase="direct_recent_history",
+                phase=phase,
                 estimated_prompt_tokens=estimated,
             )
             return self._message_content(response).strip() or self._local_recent_history_answer(state)
@@ -1290,7 +1422,7 @@ class ChatAgent(BaseAgent):
                 coroutine=call_tool,
                 name=safe_name,
                 description=self._tool_description(name, context),
-                args_schema=GenericToolArgs,
+                args_schema=tool_argument_schema(name),
                 infer_schema=False,
             )
         return wrapped
@@ -1313,10 +1445,11 @@ class ChatAgent(BaseAgent):
             "workspace.read_file": "从所选仓库 checkout 中读取文本文件，可指定 start_line 和 line_count。只读。",
             "workspace.search_code": "在所选仓库 checkout 中搜索代码或文档文本。只读。",
             "repo_health.generate_summary": "总结当前仓库健康状态。",
+            "repo.get_issue": "直接读取当前仓库已同步 Issue 的指定字段。按 number 或 issue_id 选择；省略则读最新 Issue。只查标题时用 fields=[title]，只返回标题即可。只读，不调用分析模型。",
             "rag.search_similar_documents": "搜索项目历史与非结构化知识，包括 Issue 描述、PR 说明与 Review 讨论、失败 CI 日志、项目文档、上传知识和已批准的长期记忆。可传入改写后的 query，并用不同 query 连续调用以补查和交叉验证。源码优先使用 workspace 工具，团队成员和实时状态使用对应结构化工具。",
-            "issue_agent.analyze_issue": "分析最新同步的 Issue。",
+            "issue_agent.analyze_issue": "分析当前仓库 Issue；可用 number 或 issue_id 指定对象。仅查标题、正文或状态请用 repo.get_issue。",
             "pr_review_agent.analyze_pr": "分析最新同步的 PR。",
-            "ci_debug_agent.analyze_workflow_run": "分析最新失败的 CI 运行。",
+            "ci_debug_agent.analyze_workflow_run": "分析失败的 CI 运行；可用 run_id 指定对象。返回失败摘要、首个错误、根因及修复步骤。",
             "report_agent.generate_weekly_report": "生成仓库报告。",
             "safety_agent.classify_action_risk": "安全起草有风险的写操作或外部发送动作。",
             "workflow.run_engineering_review": "运行 Planner -> 专用 Agent -> Observer -> Synthesis 工作流，用于 PR 就绪度、阻塞项、优先级和多 Agent 仓库审查等跨领域工程决策。",
@@ -1338,11 +1471,12 @@ class ChatAgent(BaseAgent):
         try:
             system_prompt = (
                 "请使用用户的语言回答，并且只能基于观察结果、tool_result 记录和上下文。"
-                "关键判断要说明 WHY；把证据、推断、不确定项和下一步区分开。"
+                "先直接回答当前问题，普通聊天和单一事实问答默认一至三句话，标明依据，不主动展开无关主题。"
+                "用户只要标题时只输出标题；质疑或催促时简短纠正上一条回答，不列清单、状态字段或后续选项。"
                 "如果是审查或合并建议，不能用 looks good、没什么问题一笔带过，必须保留风险和阻塞项。"
                 "对于负责人、已分配人员、责任人或任务分配问题，只能从明确的 RepoLens team_members "
                 "或工具返回的现有 GitHub assignees 中推荐人员。仓库文档、Issue 文本、代码、示例、"
-                "角色设定、模型名和团队比喻都不能当成人。如果没有配置团队成员，也没有观察到现有 assignee，"
+                "角色设定、模型名和团队比喻都不能当成人。仅当用户询问分工或负责人，且没有配置团队成员，也没有观察到现有 assignee，"
                 "请说明当前还没有添加项目成员，并要求用户在团队面板中添加开发者。"
             )
             prompt_observations, prompt_events, runtime_stats = self._runtime_tool_context(state)
@@ -1352,6 +1486,7 @@ class ChatAgent(BaseAgent):
                 f"当前 Agent 配置的运行模型：{settings.llm_model}\n"
                 f"RepoLens 团队上下文：{self._team_assignment_context(state.get('context') or {})}\n"
                 f"上下文：{self._server_context(state.get('context') or {})}\n"
+                f"最近消息（用于理解指代，历史回答可能有误）：{json.dumps(self._history_messages(state.get('context') or {}), ensure_ascii=False)}\n"
                 f"观察结果：{json.dumps(prompt_observations, ensure_ascii=False)}\n"
                 f"工具调用/结果索引：{json.dumps(prompt_events, ensure_ascii=False)}"
             )
@@ -1607,7 +1742,7 @@ class ChatAgent(BaseAgent):
     ) -> int:
         system_tokens = estimate_tokens(system_prompt)
         user_tokens = estimate_tokens(user_prompt)
-        tool_schema_tokens = self._tool_schema_estimated_tokens(state)
+        tool_schema_tokens = self._tool_schema_estimated_tokens(state) if phase.startswith("model_decision") else 0
         total = system_tokens + user_tokens + tool_schema_tokens
         pressure = calculate_context_pressure(total)
         diagnostic = {
@@ -1622,17 +1757,8 @@ class ChatAgent(BaseAgent):
         return total
 
     def _tool_schema_estimated_tokens(self, state: ConversationState) -> int:
-        total = 0
-        for tool in (state.get("tools") or {}).values():
-            total += estimate_tokens(str(getattr(tool, "name", "")))
-            total += estimate_tokens(str(getattr(tool, "description", "")))
-            args_schema = getattr(tool, "args_schema", None)
-            try:
-                schema = args_schema.model_json_schema() if args_schema else {}
-            except (AttributeError, TypeError, ValueError):
-                schema = {}
-            total += estimate_tokens(json.dumps(schema, ensure_ascii=False, default=str))
-        return total
+        schemas = [convert_to_openai_tool(tool) for tool in (state.get("tools") or {}).values()]
+        return estimate_tokens(json.dumps(schemas, ensure_ascii=False, default=str)) if schemas else 0
 
     def _record_model_usage(
         self,
@@ -1654,6 +1780,7 @@ class ChatAgent(BaseAgent):
             usage["input_tokens"] = estimated_prompt_tokens
         if usage.get("total_tokens") is None:
             usage["total_tokens"] = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+        usage["input_pressure"] = calculate_context_pressure(int(usage.get("input_tokens") or 0)).as_dict()
         state["model_usage"] = [*(state.get("model_usage") or []), usage]
 
     def _normalize_model_usage(self, response: Any) -> dict[str, Any]:
@@ -1917,6 +2044,16 @@ class ChatAgent(BaseAgent):
                 "budget_tokens": limit,
             },
             "citations_count": len(observation.get("citations", [])),
+            "record_identity": observation.get("record_identity") or {},
+            "record_fields": {
+                key: value for key, value in (observation.get("issue") or {}).items()
+                if key in {"title", "number", "state", "author"} and isinstance(value, (str, int))
+            },
+            "citations": [
+                {key: item[key] for key in ("type", "id", "title") if key in item}
+                for item in (observation.get("citations") or [])[:8]
+                if isinstance(item, dict)
+            ],
         }
 
     def _initial_evaluation_trace(self, message: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -1961,6 +2098,7 @@ class ChatAgent(BaseAgent):
         tool_name: str,
         arguments: dict[str, Any],
         observation: dict[str, Any],
+        visible_content: str = "",
     ) -> None:
         if not (state.get("context") or {}).get("evaluation_mode"):
             return
@@ -1978,6 +2116,7 @@ class ChatAgent(BaseAgent):
                 )
                 else "success",
                 "content": str(observation.get("answer") or ""),
+                "visible_content": visible_content,
             }
         )
         trace["tool_observations"] = tool_observations
@@ -1992,11 +2131,20 @@ class ChatAgent(BaseAgent):
                 for item in observation.get("retrieved_contexts", [])
                 if str(item).strip()
             ]
+        successful = not any(call.get("status") == "error" for call in observation.get("tool_calls") or [] if isinstance(call, dict))
+        if tool_name in {"workspace.read_file", "workspace.search_code"} and successful and visible_content.strip():
+            contexts = [visible_content.strip()]
+            sources = [
+                {"id": str(item.get("id") or ""), "source_id": str(item.get("id") or ""),
+                 "source_type": "workspace_file", "title": str(item.get("title") or arguments.get("path") or "workspace")}
+                for item in observation.get("citations") or [] if isinstance(item, dict)
+            ]
         if tool_name == "rag.search_similar_documents" or contexts or sources:
             retrievals = list(trace.get("retrievals") or [])
             retrievals.append(
                 {
                     "stage": "agent_tool",
+                    "tool_name": tool_name,
                     "query": str(arguments.get("query") or arguments.get("message") or ""),
                     "contexts": contexts,
                     "sources": sources,

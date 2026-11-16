@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 import os
@@ -22,7 +23,7 @@ from app.services.agents.recommendation_agent import RecommendationAgent
 from app.services.agents.report_agent import ReportAgent
 from app.services.agents.safety_agent import SafetyAgent
 from app.services.agents.workflow_orchestrator import WorkflowOrchestrator
-from app.services.chat_memory import ContextAssembler, EvidenceStore, MessageStore, ProgressiveContextManager, SessionSealer
+from app.services.chat_memory import ContextAssembler, EvidenceStore, MessageStore, ProgressiveContextManager, SessionSealer, pre_retrieval_policy
 from app.services.code_search import query_terms, search_checkout_code
 from app.services.conversations import ensure_conversation, touch_conversation
 from app.services.memory_hub import record_recall_event
@@ -1096,10 +1097,53 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
             ],
         }
 
+    def select_issue(input_data: dict[str, Any]) -> Issue | None:
+        query = db.query(Issue).filter(Issue.repo_id == repo.id)
+        if input_data.get("issue_id"):
+            query = query.filter(Issue.id == uuid.UUID(str(input_data["issue_id"])))
+        if input_data.get("number") is not None:
+            query = query.filter(Issue.number == int(input_data["number"]))
+        issue = query.order_by(Issue.created_at.desc(), Issue.number.desc()).first()
+        if issue is None and (input_data.get("issue_id") or input_data.get("number") is not None):
+            raise LookupError("当前仓库未同步指定 Issue；不会改用其他 Issue。")
+        return issue
+
+    def issue_record(issue: Issue) -> dict[str, Any]:
+        return {
+            "id": str(issue.id), "number": issue.number, "title": issue.title,
+            "body": issue.body, "state": issue.state, "labels": issue.labels,
+            "assignees": issue.assignees, "author": issue.author,
+        }
+
+    async def get_issue(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        if repo is None:
+            return await repo_health(input_data, context)
+        issue = select_issue(input_data)
+        if issue is None:
+            return {"route": "issue_detail", "tool_calls": [], "answer": "当前仓库还没有同步到 Issue。", "citations": []}
+        record = issue_record(issue)
+        fields = input_data.get("fields")
+        if fields is not None:
+            if not isinstance(fields, list) or not fields or any(field not in record for field in fields):
+                raise ValueError("fields 必须是非空的有效 Issue 字段列表。")
+            record = {field: record[field] for field in dict.fromkeys(fields)}
+        answer = "\n".join(f"{key}: {json.dumps(value, ensure_ascii=False) if isinstance(value, (list, dict)) else value or ''}" for key, value in record.items())
+        if len(record) == 1:
+            value = next(iter(record.values()))
+            answer = json.dumps(value, ensure_ascii=False) if isinstance(value, (list, dict)) else str(value or "")
+        return {
+            "route": "issue_detail",
+            "tool_calls": [{"tool_name": "repo.get_issue", "arguments": {"issue_id": str(issue.id), "number": issue.number, **({"fields": fields} if fields is not None else {})}, "status": "success"}],
+            "answer": answer,
+            "issue": record,
+            "record_identity": {"id": str(issue.id), "number": issue.number},
+            "citations": [{"type": "issue", "id": str(issue.id), "title": issue.title}],
+        }
+
     async def analyze_issue(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
             return await repo_health(input_data, context)
-        issue = db.query(Issue).filter(Issue.repo_id == repo.id).order_by(Issue.created_at.desc()).first()
+        issue = select_issue(input_data)
         if not issue:
             return {"route": "issue_analysis", "tool_calls": [], "answer": f"仓库 {repo.full_name} 还没有同步到 Issue。", "citations": []}
         result = await IssueAgent().run(
@@ -1119,7 +1163,9 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
             "route": "issue_analysis",
             "tool_calls": [{"tool_name": "issue_agent.analyze_issue", "arguments": {"issue_id": str(issue.id)}, "status": "success"}],
             "answer": (
-                f"Issue #{issue.number} 的结论：{result['conclusion']}。\n\n"
+                f"Issue #{issue.number}：{issue.title}\n"
+                f"正文：{issue.body or '（无正文）'}\n\n"
+                f"分析结论：{result['conclusion']}。\n\n"
                 f"- 分类：{result['category']}\n"
                 f"- 优先级：{result['priority']}\n"
                 f"- 复杂度：{result['complexity']}\n"
@@ -1162,7 +1208,14 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
     async def analyze_ci(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
         if repo is None:
             return await repo_health(input_data, context)
-        run = db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo.id, WorkflowRun.conclusion == "failure").order_by(WorkflowRun.created_at.desc()).first()
+        query = db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo.id)
+        if input_data.get("run_id"):
+            query = query.filter(WorkflowRun.id == uuid.UUID(str(input_data["run_id"])))
+        else:
+            query = query.filter(WorkflowRun.conclusion == "failure")
+        run = query.order_by(WorkflowRun.created_at.desc()).first()
+        if run is None and input_data.get("run_id"):
+            raise LookupError("当前仓库未同步指定 CI 运行；不会改用其他运行。")
         if not run:
             issues, prs, runs = _repo_payload(repo.id, db)
             return {
@@ -1175,7 +1228,14 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
         return {
             "route": "ci_debug",
             "tool_calls": [{"tool_name": "ci_debug_agent.analyze_workflow_run", "arguments": {"run_id": str(run.id)}, "status": "success"}],
-            "answer": f"最新失败 CI：{run.name}。失败类型：{result['failure_type']}。\n\n{result['failure_summary']}\n\n排查步骤：{_join_items(result['debug_steps'], '没有明确可用的排查步骤。')}",
+            "answer": (
+                f"CI：{run.name}；run_id：{run.id}；运行结论：{run.conclusion}；链接：{run.html_url or '未提供'}。\n"
+                f"失败类型：{result['failure_type']}。\n{result['failure_summary']}\n\n"
+                f"首个错误：{result.get('first_error') or '未取得明确错误文本'}\n\n"
+                f"根因分析：{result.get('root_cause') or '尚未确认'}\n\n"
+                f"修复步骤：{_join_items(result.get('fix_steps') or [], '暂无')}\n\n"
+                f"排查步骤：{_join_items(result['debug_steps'], '没有明确可用的排查步骤。')}"
+            ),
             "citations": [{"type": "workflow_run", "id": str(run.id), "title": run.name}],
         }
 
@@ -1299,6 +1359,7 @@ def _build_conversation_tools(repo: Repository | None, conversation: Conversatio
         "workspace.read_file": read_workspace_file,
         "workspace.search_code": search_workspace_code,
         "repo_health.generate_summary": repo_health,
+        "repo.get_issue": get_issue,
         "rag.search_similar_documents": semantic_search,
         "issue_agent.analyze_issue": analyze_issue,
         "pr_review_agent.analyze_pr": analyze_pr,
@@ -1488,7 +1549,8 @@ async def _conversation_plan_execute_sse(payload: ChatPlanExecuteRequest, db: Se
         db.commit()
     message_store = MessageStore(db)
     user_message = message_store.append(repo_id=repo.id, conversation_id=conversation.id, role="user", content=payload.message)
-    EvidenceStore(db).rebuild_repo(repo, conversation)
+    if pre_retrieval_policy(payload.message)["enabled"]:
+        EvidenceStore(db).rebuild_repo(repo, conversation)
     db.commit()
     assembled = ContextAssembler(db).assemble(repo, conversation, payload.message)
     context = {
@@ -1612,7 +1674,8 @@ async def _conversation_response(payload: ChatRequest, db: Session) -> dict[str,
         db.commit()
     message_store = MessageStore(db)
     user_message = message_store.append(repo_id=repo.id, conversation_id=conversation.id, role="user", content=payload.message)
-    EvidenceStore(db).rebuild_repo(repo, conversation)
+    if pre_retrieval_policy(payload.message)["enabled"]:
+        EvidenceStore(db).rebuild_repo(repo, conversation)
     db.commit()
     assembled = ContextAssembler(db).assemble(repo, conversation, payload.message)
     context = {
@@ -1676,7 +1739,8 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
         db.commit()
     message_store = MessageStore(db)
     user_message = message_store.append(repo_id=repo.id, conversation_id=conversation.id, role="user", content=payload.message)
-    EvidenceStore(db).rebuild_repo(repo, conversation)
+    if pre_retrieval_policy(payload.message)["enabled"]:
+        EvidenceStore(db).rebuild_repo(repo, conversation)
     db.commit()
     assembled = ContextAssembler(db).assemble(repo, conversation, payload.message)
     context = {

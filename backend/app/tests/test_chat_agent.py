@@ -11,6 +11,29 @@ from app.core.config import settings
 from app.services.agents.chat_agent import ChatAgent
 
 
+def test_native_tools_do_not_repeat_unrelated_argument_schemas():
+    async def tool(arguments, context):
+        return {"answer": "ok"}
+
+    agent = ChatAgent(model=object())
+    tools = agent._build_langchain_tools({name: tool for name in agent.available_tools}, {})
+    issue_fields = tools["repo__get_issue"].args_schema.model_json_schema()["properties"]
+    read_fields = tools["workspace__read_file"].args_schema.model_json_schema()["properties"]
+    assert "session_id" not in issue_fields
+    assert "issue_id" not in read_fields
+    assert agent._tool_schema_estimated_tokens({"tools": tools}) < 6000
+
+
+def test_unbound_synthesis_does_not_count_tool_schemas():
+    async def tool(arguments, context):
+        return {"answer": "ok"}
+
+    agent = ChatAgent(model=object())
+    state = {"tools": agent._build_langchain_tools({"workspace.read_file": tool}, {})}
+    agent._record_prompt_diagnostics(state, phase="final_from_observations", system_prompt="Answer", user_prompt="Question")
+    assert state["prompt_diagnostics"][-1]["tool_schema_tokens"] == 0
+
+
 class ScriptedToolModel:
     def __init__(self) -> None:
         self.calls = 0
@@ -58,6 +81,24 @@ class RecentRecallModel:
     async def ainvoke(self, messages: list[Any]) -> AIMessage:
         self.calls += 1
         return AIMessage(content="你刚刚说的是：hi")
+
+
+@pytest.mark.asyncio
+async def test_social_reply_does_not_bind_tools_or_send_their_schemas():
+    model = RecentRecallModel()
+
+    async def unexpected_tool(*args, **kwargs):
+        pytest.fail("A greeting must not invoke repository tools")
+
+    result = await ChatAgent(model=model).run({"message": "你好"}, {
+        "tools": {"workspace.read_file": unexpected_tool},
+        "compression_stats": {"pre_retrieval": {"enabled": False, "reason": "social_message"}},
+    })
+    assert model.calls == 1
+    assert model.bind_tools_calls == 0
+    assert result["tool_calls"] == []
+    assert result["context_diagnostics"]["prompt_calls"][0]["tool_schema_tokens"] == 0
+    assert result["model_usage"][0]["phase"] == "direct_chat"
 
 
 class CapturingModel:

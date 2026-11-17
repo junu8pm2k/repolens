@@ -202,7 +202,7 @@ def test_skill_registry_annotates_entrypoint_tool_calls() -> None:
     )
 
     assert annotated["skill_name"] == "safety-draft"
-    assert annotated["skill_version"] == "0.1.0"
+    assert annotated["skill_version"] == "0.1.1"
     assert "require_confirmation" in annotated["skill_steps"]
 
 

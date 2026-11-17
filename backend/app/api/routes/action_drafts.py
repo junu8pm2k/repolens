@@ -9,8 +9,6 @@ from app.core.security import decrypt_token
 from app.db.models import (
     ActionDraft,
     AuditLog,
-    Issue,
-    PullRequest,
     Repository,
     User,
 )
@@ -21,31 +19,11 @@ from app.schemas.action_drafts import (
     ActionDraftResponse,
     AuditLogResponse,
 )
+from app.services.action_drafts import target_number, validate_action_draft
 from app.services.github.client import GitHubClient
 from app.services.permissions import require_permission, write_audit_log
 
 router = APIRouter()
-
-
-def _target_number(db: Session, draft: ActionDraft) -> int | None:
-    meta = draft.meta or {}
-    raw = (
-        meta.get("target_number")
-        or meta.get("issue_number")
-        or meta.get("pr_number")
-    )
-    if raw is not None:
-        try:
-            return int(raw)
-        except (TypeError, ValueError):
-            return None
-    if draft.target_id and draft.target_type == "issue":
-        issue = db.get(Issue, draft.target_id)
-        return issue.number if issue else None
-    if draft.target_id and draft.target_type in {"pull_request", "pr"}:
-        pr = db.get(PullRequest, draft.target_id)
-        return pr.number if pr else None
-    return None
 
 
 async def _execute_github_draft(
@@ -60,7 +38,7 @@ async def _execute_github_draft(
     )
     client = GitHubClient(token=token, base_url=repo.api_base_url)
     draft_type = draft.draft_type.lower()
-    issue_number = _target_number(db, draft)
+    issue_number = target_number(db, draft)
     if draft_type in {"issue_comment", "pr_comment", "comment"}:
         if issue_number is None:
             raise RuntimeError("评论草稿缺少 issue/pr number")
@@ -121,6 +99,10 @@ async def create_action_draft(
         created_by=user.id,
         meta=payload.metadata,
     )
+    try:
+        validate_action_draft(db, draft)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.add(draft)
     write_audit_log(
         db,
@@ -214,6 +196,23 @@ async def confirm_action_draft(
     repo = db.get(Repository, draft.repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="未找到仓库")
+    try:
+        validate_action_draft(db, draft)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Claim the draft before awaiting GitHub to prevent duplicate writes.
+    claimed = (
+        db.query(ActionDraft)
+        .filter(
+            ActionDraft.id == draft.id,
+            ActionDraft.status == "pending_confirmation",
+        )
+        .update({"status": "executing"}, synchronize_session=False)
+    )
+    db.commit()
+    if not claimed:
+        raise HTTPException(status_code=409, detail="草稿已被确认，请刷新状态")
+    db.refresh(draft)
     try:
         result = await _execute_github_draft(db, draft, repo)
         draft.status = "executed"

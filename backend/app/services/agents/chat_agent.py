@@ -101,6 +101,22 @@ class GenericToolArgs(BaseModel):
         ),
     )
     pr_id: str | None = Field(default=None, description="PR UUID")
+    draft_type: (
+        Literal[
+            "create_issue",
+            "issue_comment",
+            "pr_comment",
+            "close_issue",
+            "label",
+            "send_report",
+        ]
+        | None
+    ) = Field(default=None, description="用户要求的具体写操作类型")
+    title: str | None = Field(default=None, description="待发布的实际标题")
+    content: str | None = Field(
+        default=None, description="待发布的实际正文，保留用户指定的文本"
+    )
+    labels: list[str] | None = Field(default=None, description="要添加的标签")
 
 
 TOOL_ARGUMENT_FIELDS = {
@@ -114,7 +130,14 @@ TOOL_ARGUMENT_FIELDS = {
     "ci_debug_agent.analyze_workflow_run": ("run_id",),
     "rag.search_similar_documents": ("query", "limit"),
     "report_agent.generate_weekly_report": ("message",),
-    "safety_agent.classify_action_risk": ("message",),
+    "safety_agent.classify_action_risk": (
+        "message",
+        "draft_type",
+        "title",
+        "content",
+        "number",
+        "labels",
+    ),
     "workflow.run_engineering_review": ("message",),
     "repolens_search_evidence": ("query", "limit"),
     "repolens_get_thread_context": (
@@ -1509,7 +1532,9 @@ class ChatAgent(BaseAgent):
             "team_members 中。仅当用户询问人员分工且没有配置团队成员时，说"
             "明这一点并要求先添加开发者后再分配任务。当用户请求 GitHub 写"
             "入、关闭、打标签、评论、发布、回复或发送时，必须先调用安全工"
-            "具；除非存在单独的已确认写入工具，否则只返回草稿。对于合并就"
+            "具，传入具体 draft_type、实际 title/content 和明确的目标编号，"
+            "不要将草稿说明当成待发布正文。安全工具只起草；用户确认已有草"
+            "稿由服务端按草稿 ID 处理，不要再次起草或声称已执行。对于合并就"
             "绪度、当前阻塞、优先级规划，或需要 Issue + PR + CI + RAG 综合"
             "判断的跨领域工程决策，优先使用 "
             "workflow.run_engineering_review 工具。"
@@ -1604,6 +1629,9 @@ class ChatAgent(BaseAgent):
         normalized = dict(action_input)
         message = str(state.get("message") or "")
         context = state.get("context") or {}
+
+        if action == "safety_agent.classify_action_risk":
+            normalized["message"] = message
 
         if action in {
             "repo_health.generate_summary",
@@ -2088,7 +2116,9 @@ class ChatAgent(BaseAgent):
             ),
             "report_agent.generate_weekly_report": "生成仓库报告。",
             ("safety_agent.classify_action_risk"): (
-                "安全起草有风险的写操作或外部发送动作。"
+                "生成待确认的写操作草稿。创建 Issue 传 create_issue、实际"
+                "标题和正文；评论必须指定 Issue/PR 编号和评论正文。不能执行"
+                "或确认已有草稿，确认由服务端处理。"
             ),
             ("workflow.run_engineering_review"): (
                 "运行 Planner -> 专用 Agent -> Observer -> Synthesis 工作"

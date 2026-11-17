@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
+from app.api.routes.action_drafts import confirm_action_draft
 from app.core.config import settings
 from app.db.models import (
     ActionDraft,
@@ -33,6 +34,7 @@ from app.schemas.chat import (
     PromptRecommendationResponse,
 )
 from app.schemas.workflow import WorkflowSpec, WorkflowTask, WorkflowTaskResult
+from app.services.action_drafts import validate_action_draft
 from app.services.agents.chat_agent import ChatAgent, encode_sse
 from app.services.agents.ci_debug_agent import CIDebugAgent
 from app.services.agents.issue_agent import IssueAgent
@@ -54,7 +56,10 @@ from app.services.code_search import query_terms, search_checkout_code
 from app.services.conversations import ensure_conversation, touch_conversation
 from app.services.mcp_client import StdioMcpClient
 from app.services.memory_hub import record_recall_event
-from app.services.permissions import ensure_demo_user, write_audit_log
+from app.services.permissions import (
+    require_permission,
+    write_audit_log,
+)
 from app.services.rag.retrieval import search_similar_documents
 from app.services.rag.vector_store import add_document
 from app.services.skills import SkillRegistry, get_skill_registry
@@ -261,6 +266,7 @@ def _client_context(value: dict[str, Any] | None) -> dict[str, Any]:
         "progressive_compaction",
         "registered_skills",
         "skill_description_by_tool",
+        "request_message_id",
     }
     return {
         key: item
@@ -295,15 +301,149 @@ def _source_type_from_message(message: str) -> str | None:
 
 def _risky_action(message: str) -> str | None:
     lowered = message.lower()
-    if any(token in lowered for token in ["comment", "reply", "post"]):
-        return "comment"
-    if any(token in lowered for token in ["create issue", "new issue"]):
+    # Title/body text may mention actions unrelated to the request.
+    intent = re.split(r"标题|正文|\btitle\s*:|\bbody\s*:", lowered)[0]
+    if re.search(
+        r"\b(?:create|new|open)\s+(?:(?:a|an|another|second|test)\s+)*issue\b"
+        r"|(?:创建|新建|新增|建立|提)[^。\n:：]{0,60}(?:issue|工单|议题)",
+        intent,
+    ):
         return "create_issue"
-    if any(token in lowered for token in ["send", "send_report"]):
+    if re.search(
+        r"close\s+issue|关闭[^。\n]{0,20}(?:issue|工单|议题)", intent
+    ):
+        return "close_issue"
+    if re.search(r"\blabel\b|标签", intent):
+        return "label"
+    if re.search(r"\b(?:comment|reply|post)\b|评论|回复|留言", intent):
+        return "comment"
+    if re.search(r"\bsend(?:_report)?\b|(?:发送|发出|发给).*报告", intent):
         return "send_report"
-    if any(token in lowered for token in ["close issue", "label", "write"]):
-        return "write_back"
     return None
+
+
+def _is_draft_confirmation(message: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*(?:请\s*)?(?:确认(?:发布|执行|提交|发送)?"
+            r"|confirm(?:\s+(?:publish|execute|submit|send))?)"
+            r"(?=$|[\s:：，,。.!！]|草稿)",
+            message,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _issue_draft_fields(message: str) -> tuple[str, str]:
+    title_match = re.search(
+        r"(?:标题|\btitle)\s*(?:为|是|[:：])?\s*"
+        r"(?:「(?P<corner>.*?)」|“(?P<curly>.*?)”|\"(?P<quote>.*?)\""
+        r"|(?P<plain>[^\n，,]+))",
+        message,
+        re.IGNORECASE,
+    )
+    title = (
+        next(value for value in title_match.groups() if value is not None)
+        if title_match
+        else message.strip()[:120]
+    )
+    body_match = re.search(
+        r"(?:正文|\bbody)\s*(?:为|是|[:：])?\s*(.*)",
+        message,
+        re.IGNORECASE | re.DOTALL,
+    )
+    body = body_match.group(1).strip() if body_match else message.strip()
+    return title.strip(), body
+
+
+async def _confirm_chat_draft(
+    message: str,
+    repo: Repository,
+    conversation: Conversation,
+    db: Session,
+) -> dict[str, Any] | None:
+    # Only the incoming user message can authorize execution, never tool text.
+    if not _is_draft_confirmation(message):
+        return None
+    identifiers = set(
+        re.findall(
+            r"\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b",
+            message,
+            re.IGNORECASE,
+        )
+    )
+    result: dict[str, Any] = {
+        "route": "safety_confirmation",
+        "tool_calls": [],
+        "citations": [],
+    }
+    if re.search(
+        r"[?？]|(?:不要|不必|别|取消|暂不|先不).*(?:执行|发布|提交|发送)"
+        r"|\b(?:do not|don't|cancel|not yet)\b",
+        message,
+        re.IGNORECASE,
+    ):
+        result["answer"] = (
+            "尚未执行草稿；请明确确认草稿 ID，或到安全草稿页面操作。"
+        )
+        return result
+    if len(identifiers) > 1:
+        result["answer"] = "请只指定一个要确认的草稿 ID。"
+        return result
+    if identifiers:
+        draft = db.get(ActionDraft, uuid.UUID(next(iter(identifiers))))
+        if draft is None or draft.repo_id != repo.id:
+            result["answer"] = "当前仓库中未找到该草稿，请核对草稿 ID。"
+            return result
+    else:
+        drafts = (
+            db.query(ActionDraft)
+            .filter(
+                ActionDraft.repo_id == repo.id,
+                ActionDraft.status == "pending_confirmation",
+            )
+            .all()
+        )
+        drafts = [
+            draft
+            for draft in drafts
+            if (draft.meta or {}).get("conversation_id")
+            == str(conversation.id)
+        ]
+        if len(drafts) != 1:
+            result["answer"] = "请提供要确认的草稿 ID，或到安全草稿页面确认。"
+            return result
+        draft = drafts[0]
+    if draft.status != "pending_confirmation":
+        result["answer"] = (
+            f"草稿 {draft.id} 当前状态为 {draft.status}，未重复执行。"
+        )
+        return result
+    try:
+        user = require_permission("draft:approve")(db)
+        execution = await confirm_action_draft(draft.id, db=db, user=user)
+    except HTTPException as exc:
+        result["answer"] = f"无法执行草稿 {draft.id}：{exc.detail}"
+        return result
+    draft = execution["draft"]
+    succeeded = draft.status == "executed"
+    result["tool_calls"] = [
+        {
+            "tool_name": "action_draft.confirm",
+            "arguments": {"draft_id": str(draft.id)},
+            "status": "success" if succeeded else "failed",
+        }
+    ]
+    if succeeded:
+        response = draft.execution_result or {}
+        url = response.get("html_url")
+        detail = response.get("message") or "已确认并执行草稿。"
+        result["answer"] = f"{detail}\n\n草稿 ID：{draft.id}"
+        if url:
+            result["answer"] += f"\n\n[查看 GitHub 结果]({url})"
+    else:
+        result["answer"] = f"草稿 {draft.id} 执行失败：{draft.error_message}"
+    return result
 
 
 def _date_window_from_context(
@@ -637,12 +777,9 @@ def _draft_for_action(
     latest_pr = sorted(prs, key=_item_time, reverse=True)[0] if prs else None
     failed_runs = [run for run in runs if run.conclusion == "failure"]
     if action == "create_issue":
+        title, body = _issue_draft_fields(message)
         return (
-            (
-                f"## Issue 草稿\n标题：{message.strip()[:120]}\n\n### 背景\n请"
-                f"补充影响范围、复现步骤和预期行为。\n\n### 验收标准\n- 预期行"
-                f"为清晰\n- 包含验证步骤\n"
-            ),
+            f"## Issue 草稿\n标题：{title}\n\n{body}",
             citations,
         )
     if action == "comment" and latest_pr:
@@ -688,8 +825,8 @@ def _draft_for_action(
         return draft, citations
     return (
         (
-            f"## 写操作草稿\n这可能会写入 GitHub 或外部渠道。MVP 模式只生成动"
-            f"作草稿。\n\n用户请求：{message.strip()}\n"
+            f"## 写操作草稿\n此操作需要人工确认后才能执行。"
+            f"\n\n用户请求：{message.strip()}\n"
         ),
         citations,
     )
@@ -1294,6 +1431,7 @@ def _build_conversation_tools(
     repo: Repository | None, conversation: Conversation | None, db: Session
 ) -> dict[str, Any]:
     mcp_client = StdioMcpClient()
+    safety_result: dict[str, Any] | None = None
 
     def agent_context(context: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -1974,59 +2112,150 @@ def _build_conversation_tools(
     async def check_safety(
         input_data: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
+        nonlocal safety_result
         if repo is None:
             return await repo_health(input_data, context)
+        if safety_result is not None:
+            return safety_result
+        message = str(input_data.get("message") or "").strip()
+        if _is_draft_confirmation(message):
+            return {
+                "route": "safety_confirmation",
+                "tool_calls": [],
+                "answer": "确认已有草稿请提供草稿 ID，或在安全草稿页面确认。",
+                "citations": [],
+            }
         issues, prs, runs = _repo_payload(repo.id, db)
-        action = _risky_action(input_data["message"]) or "write_back"
-        draft, citations = _draft_for_action(
-            action, input_data["message"], repo, issues, prs, runs
-        )
-        safety = await SafetyAgent().run(
-            {"action": action, "draft": draft}, agent_context(context)
-        )
-        latest_issue = (
-            sorted(issues, key=_item_time, reverse=True)[0] if issues else None
-        )
-        latest_pr = (
-            sorted(prs, key=_item_time, reverse=True)[0] if prs else None
-        )
+        requested_type = input_data.get("draft_type")
+        action = _risky_action(message) or {
+            "issue_comment": "comment",
+            "pr_comment": "comment",
+        }.get(requested_type, requested_type)
+        if action not in {
+            "create_issue",
+            "comment",
+            "close_issue",
+            "label",
+            "send_report",
+        }:
+            return {
+                "route": "safety_clarification",
+                "tool_calls": [],
+                "answer": "请明确要执行的操作；尚未创建草稿。",
+                "citations": [],
+            }
         target_type = "repository"
         target_id = None
         metadata: dict[str, Any] = {
             "source": "chat",
-            "message": input_data["message"],
+            "message": message,
+            "conversation_id": str(conversation.id) if conversation else None,
+            "request_message_id": context.get("request_message_id"),
         }
-        if action == "comment" and latest_pr:
-            target_type = "pull_request"
-            target_id = latest_pr.id
-            metadata["pr_number"] = latest_pr.number
-        elif (
-            action in {"comment", "create_issue", "close_issue"}
-            and latest_issue
-        ):
-            target_type = "issue"
-            target_id = latest_issue.id
-            metadata["issue_number"] = latest_issue.number
+        if action in {"comment", "close_issue", "label"}:
+            try:
+                issue_number = _requested_workflow_target_number(
+                    message, "issue"
+                )
+                pr_number = _requested_workflow_target_number(
+                    message, "pull_request"
+                )
+                if issue_number is not None and pr_number is not None:
+                    raise ValueError("请只指定一个 Issue 或 PR 目标")
+                number = issue_number or pr_number or input_data.get("number")
+                target_type = (
+                    "pull_request"
+                    if pr_number is not None
+                    or (
+                        issue_number is None and requested_type == "pr_comment"
+                    )
+                    else "issue"
+                )
+                candidates = prs if target_type == "pull_request" else issues
+                target = next(
+                    (item for item in candidates if item.number == number),
+                    None,
+                )
+                target_id = target.id if target else None
+                metadata["target_number"] = number
+                # The preview must refer to the requested object, never latest.
+                issues = [target] if target_type == "issue" and target else []
+                prs = (
+                    [target]
+                    if target_type == "pull_request" and target
+                    else []
+                )
+            except ValueError as exc:
+                return {
+                    "route": "safety_clarification",
+                    "tool_calls": [],
+                    "answer": str(exc),
+                    "citations": [],
+                }
+        if action == "label":
+            metadata["labels"] = input_data.get("labels") or []
+            if not metadata["labels"]:
+                return {
+                    "route": "safety_clarification",
+                    "tool_calls": [],
+                    "answer": "请指定要添加的标签；尚未创建草稿。",
+                    "citations": [],
+                }
+        draft, citations = _draft_for_action(
+            action, message, repo, issues, prs, runs
+        )
+        title = str(input_data.get("title") or "").strip()
+        content = str(input_data.get("content") or "").strip()
+        if action == "create_issue":
+            parsed_title, parsed_body = _issue_draft_fields(message)
+            title = (
+                parsed_title
+                if re.search(r"标题|\btitle\b", message, re.IGNORECASE)
+                else title or parsed_title
+            )
+            content = (
+                parsed_body
+                if re.search(r"正文|\bbody\b", message, re.IGNORECASE)
+                else content or parsed_body
+            )
+        elif action == "comment":
+            title = title or "评论草稿"
+            # A generic preview is not a user-approved comment body.
+            content = str(input_data.get("content") or "").strip()
+        else:
+            title = title or f"{action} 草稿"
+            content = content or draft
+        safety = await SafetyAgent().run(
+            {"action": action, "draft": content}, agent_context(context)
+        )
         draft_type = {
             "comment": "pr_comment"
             if target_type == "pull_request"
             else "issue_comment",
             "create_issue": "create_issue",
             "send_report": "send_report",
-            "write_back": "comment",
         }.get(action, action)
-        user = ensure_demo_user(db)
+        user = require_permission("draft:create")(db)
         action_draft = ActionDraft(
             repo_id=repo.id,
             draft_type=draft_type,
             target_type=target_type,
             target_id=target_id,
-            title=f"{draft_type} 草稿",
-            content=str(safety.get("draft") or draft),
+            title=title,
+            content=content,
             risk_level=str(safety.get("risk_level") or "medium"),
             created_by=user.id,
             meta=metadata,
         )
+        try:
+            validate_action_draft(db, action_draft)
+        except ValueError as exc:
+            return {
+                "route": "safety_clarification",
+                "tool_calls": [],
+                "answer": f"{exc}；尚未创建草稿。",
+                "citations": [],
+            }
         db.add(action_draft)
         db.flush()
         write_audit_log(
@@ -2039,7 +2268,7 @@ def _build_conversation_tools(
             request_json={"action": action, "draft_type": draft_type},
             result_json={"draft_id": str(action_draft.id)},
         )
-        return {
+        safety_result = {
             "route": "safety_draft",
             "tool_calls": [
                 {
@@ -2052,12 +2281,12 @@ def _build_conversation_tools(
                 }
             ],
             ("answer"): (
-                f"这个请求可能写入 GitHub 或发送到外部渠道，已生成待确认安全草"
-                f"稿。\n\n草稿 ID：{action_draft.id}\n\n"
-                f"{str(safety.get('draft') or draft)}"
+                f"已生成待确认草稿，确认后将执行该操作。\n\n"
+                f"草稿 ID：{action_draft.id}\n\n标题：{title}\n\n{content}"
             ),
             "citations": citations,
         }
+        return safety_result
 
     async def run_engineering_workflow(
         input_data: dict[str, Any], context: dict[str, Any]
@@ -2523,8 +2752,11 @@ async def _conversation_response(
         "compression_stats": assembled.compression_stats,
         "progressive_compaction": compaction_stats,
     }
+    context["request_message_id"] = str(user_message.id)
     context["tools"] = _build_conversation_tools(repo, conversation, db)
-    result = await ChatAgent().run({"message": payload.message}, context)
+    result = await _confirm_chat_draft(payload.message, repo, conversation, db)
+    if result is None:
+        result = await ChatAgent().run({"message": payload.message}, context)
     run_id = uuid.uuid4()
     result["run_id"] = str(run_id)
     result["compression_stats"] = assembled.compression_stats
@@ -2577,6 +2809,24 @@ async def _conversation_response(
     return result
 
 
+async def _conversation_events(
+    payload: ChatRequest,
+    repo: Repository,
+    conversation: Conversation,
+    db: Session,
+    context: dict[str, Any],
+):
+    result = await _confirm_chat_draft(payload.message, repo, conversation, db)
+    if result is None:
+        async for event in ChatAgent().run_stream(
+            {"message": payload.message}, context
+        ):
+            yield event
+    else:
+        yield {"event": "delta", "data": {"content": result["answer"]}}
+        yield {"event": "final", "data": result}
+
+
 async def _conversation_sse(payload: ChatRequest, db: Session):
     repo = _repo_or_404(db, payload.repo_id)
     conversation = ensure_conversation(db, repo.id, payload.conversation_id)
@@ -2610,10 +2860,11 @@ async def _conversation_sse(payload: ChatRequest, db: Session):
         "compression_stats": assembled.compression_stats,
         "progressive_compaction": compaction_stats,
     }
+    context["request_message_id"] = str(user_message.id)
     context["tools"] = _build_conversation_tools(repo, conversation, db)
     try:
-        async for event in ChatAgent().run_stream(
-            {"message": payload.message}, context
+        async for event in _conversation_events(
+            payload, repo, conversation, db, context
         ):
             if event["event"] == "final":
                 run_id = uuid.uuid4()

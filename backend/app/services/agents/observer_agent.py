@@ -278,7 +278,7 @@ class ObserverAgent(BaseAgent):
                         "SafetyAgent 要求用户对本次写入类操作进行人工确认。"
                     ),
                     task_ids=[safety_result.task_id],
-                    recommendation="只返回草稿；MVP 模式下不要执行外部动作。",
+                    recommendation="先生成草稿；人工确认后由独立确认接口执行。",
                 )
             ]
         return []

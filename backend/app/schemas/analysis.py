@@ -24,14 +24,26 @@ class IssueDrafts(BaseModel):
 
 class IssueAnalysisOutput(BaseModel):
     summary: str
-    conclusion: Literal["进入开发", "等待澄清", "关闭", "拆分", "合并到已有 Issue"]
+    conclusion: Literal[
+        "进入开发", "等待澄清", "关闭", "拆分", "合并到已有 Issue"
+    ]
     conclusion_reason: str
-    category: Literal["Bug", "Feature", "Question", "Documentation", "Refactor", "Test", "Ops"]
+    category: Literal[
+        "Bug",
+        "Feature",
+        "Question",
+        "Documentation",
+        "Refactor",
+        "Test",
+        "Ops",
+    ]
     priority: Literal["P0", "P1", "P2", "P3"]
     complexity: Literal["S", "M", "L", "XL"]
     suggested_owner: str
     owner_reason: str
-    duplicate_candidates: list[DuplicateCandidate] = Field(default_factory=list)
+    duplicate_candidates: list[DuplicateCandidate] = Field(
+        default_factory=list
+    )
     evidence: list[IssueEvidence] = Field(default_factory=list)
     checklist: list[str] = Field(default_factory=list)
     action_items: list[str] = Field(default_factory=list)
@@ -51,7 +63,9 @@ class PRReviewOutput(BaseModel):
     summary: str
     plan: list[str] = []
     executed_steps: list[str] = []
-    merge_recommendation: Literal["建议合入", "修改后合入", "暂缓", "拒绝"] = "暂缓"
+    merge_recommendation: Literal["建议合入", "修改后合入", "暂缓", "拒绝"] = (
+        "暂缓"
+    )
     recommendation_reason: str = ""
     review_findings: list[PRReviewFinding] = Field(default_factory=list)
     key_changes: list[str] = []
@@ -66,7 +80,15 @@ class PRReviewOutput(BaseModel):
 
 class CIDebugOutput(BaseModel):
     failure_summary: str
-    failure_type: Literal["test", "build", "lint", "dependency", "permission", "environment", "unknown"]
+    failure_type: Literal[
+        "test",
+        "build",
+        "lint",
+        "dependency",
+        "permission",
+        "environment",
+        "unknown",
+    ]
     plan: list[str] = []
     executed_steps: list[str] = []
     first_error: str | None = None

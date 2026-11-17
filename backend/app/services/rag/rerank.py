@@ -11,7 +11,10 @@ def _tokens(text: str) -> list[str]:
     tokens = re.findall(r"[a-z0-9_\-]+", lowered)
     for segment in re.findall(r"[\u4e00-\u9fff]+", lowered):
         tokens.extend(segment)
-        tokens.extend(segment[index : index + 2] for index in range(max(0, len(segment) - 1)))
+        tokens.extend(
+            segment[index : index + 2]
+            for index in range(max(0, len(segment) - 1))
+        )
     return tokens
 
 
@@ -53,10 +56,14 @@ def _freshness_bonus(metadata: dict[str, Any]) -> float:
     return 0.0
 
 
-def _heuristic_score(query: str, candidate: dict[str, Any]) -> tuple[float, str]:
+def _heuristic_score(
+    query: str, candidate: dict[str, Any]
+) -> tuple[float, str]:
     terms = _tokens(query)
     if not terms:
-        return _normalise(float(candidate.get("score") or 0.0)), "base score only"
+        return _normalise(
+            float(candidate.get("score") or 0.0)
+        ), "base score only"
     text = _candidate_text(candidate)
     title = str(candidate.get("title") or "").lower()
     metadata = candidate.get("metadata") or {}
@@ -65,16 +72,28 @@ def _heuristic_score(query: str, candidate: dict[str, Any]) -> tuple[float, str]
     coverage = len(set(matched)) / max(len(set(terms)), 1)
     title_hits = sum(1 for term in terms if term in title)
     path_hits = sum(1 for term in terms if term in path)
-    phrase_bonus = 0.12 if query.lower().strip() and query.lower().strip() in text else 0.0
-    source_bonus = 0.08 if len({term for term in terms if term in text}) >= 2 else 0.0
+    phrase_bonus = (
+        0.12
+        if query.lower().strip() and query.lower().strip() in text
+        else 0.0
+    )
+    source_bonus = (
+        0.08 if len({term for term in terms if term in text}) >= 2 else 0.0
+    )
     base = _normalise(float(candidate.get("score") or 0.0))
     keyword = _normalise(float(candidate.get("keyword_score") or 0.0))
     vector = _normalise(float(candidate.get("vector_score") or 0.0))
     sources = set((candidate.get("retrieval") or {}).get("sources") or [])
-    dual_recall_bonus = 0.05 if {"vector", "keyword"}.issubset(sources) else 0.0
+    dual_recall_bonus = (
+        0.05 if {"vector", "keyword"}.issubset(sources) else 0.0
+    )
     freshness_bonus = _freshness_bonus(metadata)
     source_type = str(candidate.get("source_type") or "").lower()
-    source_type_bonus = 0.03 if source_type and any(term in source_type for term in terms) else 0.0
+    source_type_bonus = (
+        0.03
+        if source_type and any(term in source_type for term in terms)
+        else 0.0
+    )
     score = (
         0.31 * base
         + 0.20 * vector
@@ -90,7 +109,9 @@ def _heuristic_score(query: str, candidate: dict[str, Any]) -> tuple[float, str]
     )
     reasons = []
     if coverage:
-        reasons.append(f"matched {len(set(matched))}/{len(set(terms))} query terms")
+        reasons.append(
+            f"matched {len(set(matched))}/{len(set(terms))} query terms"
+        )
     if title_hits:
         reasons.append("title match")
     if path_hits:
@@ -108,7 +129,9 @@ def _heuristic_score(query: str, candidate: dict[str, Any]) -> tuple[float, str]
     return _normalise(score), ", ".join(reasons) or "弱关键词匹配"
 
 
-def rerank_documents(query: str, candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+def rerank_documents(
+    query: str, candidates: list[dict[str, Any]], limit: int
+) -> list[dict[str, Any]]:
     if not candidates:
         return []
     top_n = min(max(settings.rag_rerank_top_n, limit), len(candidates))
@@ -131,5 +154,11 @@ def rerank_documents(query: str, candidates: list[dict[str, Any]], limit: int) -
                 },
             }
         )
-    ranked.sort(key=lambda item: (float(item.get("rerank_score") or item.get("score") or 0.0), float(item.get("combined_score") or 0.0)), reverse=True)
+    ranked.sort(
+        key=lambda item: (
+            float(item.get("rerank_score") or item.get("score") or 0.0),
+            float(item.get("combined_score") or 0.0),
+        ),
+        reverse=True,
+    )
     return [*ranked, *tail][:limit]

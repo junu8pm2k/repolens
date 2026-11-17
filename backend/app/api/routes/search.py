@@ -10,7 +10,9 @@ router = APIRouter()
 
 
 @router.post("", response_model=SearchResponse)
-async def semantic_search(payload: SearchRequest, db: Session = Depends(get_db)) -> SearchResponse:
+async def semantic_search(
+    payload: SearchRequest, db: Session = Depends(get_db)
+) -> SearchResponse:
     repo = db.get(Repository, payload.repo_id)
     if repo is None:
         raise HTTPException(status_code=404, detail="未找到仓库")
@@ -29,6 +31,8 @@ async def semantic_search(payload: SearchRequest, db: Session = Depends(get_db))
         payload.query,
         source_type=payload.source_type,
         limit=payload.limit,
-        metadata_filters={key: value for key, value in filters.items() if value},
+        metadata_filters={
+            key: value for key, value in filters.items() if value
+        },
     )
     return SearchResponse(results=results)

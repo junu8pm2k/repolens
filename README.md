@@ -98,6 +98,18 @@ npm run dev
 
 停止脚本会校验进程启动时间并结束整个进程树，重复执行也不会报找不到 PID；Docker 基础设施保持运行。如果终端已经位于 `scripts` 目录，使用 `.\start_rag.ps1` 和 `.\stop_rag.ps1`。
 
+## Python 开发检查
+
+Python 源码和测试遵循根目录 `AGENTS.md` 中的 PEP 8 约定。安装开发依赖后，在项目根目录检查格式和导入顺序：
+
+```powershell
+.\backend\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+.\backend\.venv\Scripts\python.exe -m ruff check backend/app scripts
+.\backend\.venv\Scripts\python.exe -m ruff format --check --output-format concise backend/app scripts
+```
+
+自动整理使用 `ruff check --fix` 和 `ruff format`。格式规则由根目录 `pyproject.toml` 管理，CI 会执行同样的检查。
+
 ## 模型上下文窗口
 
 `CONTEXT_DYNAMIC_MODEL_WINDOW_ENABLED=true` 时，系统按 `LLM_MODEL` 识别模型窗口，`CONTEXT_MAX_INPUT_TOKENS` 作为未知模型的回退预算。`deepseek-flash`、兼容别名 `deepseek-v4-flash` 与 `deepseek-v4-pro` 按 DeepSeek `/models` 元数据使用 **1,048,576 tokens** 的总窗口；`CONTEXT_MODEL_WINDOW_TOKENS=0` 表示自动识别，也可为自定义接口设置明确的窗口上限。

@@ -21,20 +21,36 @@ def _db_session():
 
 
 def _repo(db):
-    repo = Repository(owner="local", name="retrieval", full_name=f"local/retrieval-{uuid.uuid4()}")
+    repo = Repository(
+        owner="local",
+        name="retrieval",
+        full_name=f"local/retrieval-{uuid.uuid4()}",
+    )
     db.add(repo)
     db.flush()
     return repo
 
 
 @pytest.mark.asyncio
-async def test_retrieval_trace_reports_effective_per_request_overrides(monkeypatch):
+async def test_retrieval_trace_reports_effective_per_request_overrides(
+    monkeypatch,
+):
     db = _db_session()
     repo = _repo(db)
-    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", lambda *a, **kw: [{"id": "one", "score": 0.2, "snippet": "authentication details"}])
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base.search_similar_documents",
+        lambda *a, **kw: [
+            {"id": "one", "score": 0.2, "snippet": "authentication details"}
+        ],
+    )
     items, trace, _ = await retrieve_knowledge(
-        db, repo.id, "authentication", retrieval_method="fulltext", rerank_enabled=False,
-        score_threshold_enabled=False, score_threshold=0.93,
+        db,
+        repo.id,
+        "authentication",
+        retrieval_method="fulltext",
+        rerank_enabled=False,
+        score_threshold_enabled=False,
+        score_threshold=0.93,
     )
     assert items
     assert trace["retrieval_method"] == "fulltext"
@@ -58,12 +74,21 @@ async def test_query_embedding_does_not_block_other_async_work(monkeypatch):
         release.wait(3)
         return [0.1]
 
-    monkeypatch.setattr("app.services.rag.knowledge_base.embed_knowledge_query", embed)
-    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", lambda *a, **kw: [])
-    task = asyncio.create_task(retrieve_knowledge(db, repo.id, "authentication"))
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base.embed_knowledge_query", embed
+    )
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base.search_similar_documents",
+        lambda *a, **kw: [],
+    )
+    task = asyncio.create_task(
+        retrieve_knowledge(db, repo.id, "authentication")
+    )
     try:
         assert await asyncio.to_thread(started.wait, 2)
-        assert not task.done(), "the async loop must run while embedding is still blocked"
+        assert not task.done(), (
+            "the async loop must run while embedding is still blocked"
+        )
     finally:
         release.set()
     await task
@@ -86,12 +111,20 @@ def _document(db, repo, *, title, content, source_id=None, metadata=None):
 def test_bm25_prefers_rare_error_name_and_exposes_trace() -> None:
     db = _db_session()
     repo = _repo(db)
-    _document(db, repo, title="General retry notes", content="failure retry token failure retry token")
+    _document(
+        db,
+        repo,
+        title="General retry notes",
+        content="failure retry token failure retry token",
+    )
     rare = _document(
         db,
         repo,
         title="JWT failure",
-        content="ExpiredSignatureError is raised when the access token has expired.",
+        content=(
+            "ExpiredSignatureError is raised when the access token has "
+            "expired."
+        ),
         metadata={"path": "backend/app/auth/token.py"},
     )
     db.commit()
@@ -108,7 +141,10 @@ def test_bm25_prefers_rare_error_name_and_exposes_trace() -> None:
     assert results[0]["bm25_score"] > 0
     assert results[0]["keyword_rank"] == 1
     assert results[0]["retrieval"]["keyword_backend"] == "bm25"
-    assert "expiredsignatureerror" in results[0]["retrieval"]["bm25_matched_terms"]
+    assert (
+        "expiredsignatureerror"
+        in results[0]["retrieval"]["bm25_matched_terms"]
+    )
 
 
 def test_metadata_state_filter_is_applied_before_bm25_scoring() -> None:
@@ -149,14 +185,22 @@ def test_weighted_fusion_uses_project_formula_and_dual_recall_bonus() -> None:
             "score": 1.0,
             "vector_score": 1.0,
             "metadata": {"chunk_id": "chunk-shared"},
-            "retrieval": {"sources": ["vector"], "vector_score": 1.0, "vector_rank": 1},
+            "retrieval": {
+                "sources": ["vector"],
+                "vector_score": 1.0,
+                "vector_rank": 1,
+            },
         },
         {
             "id": "vector-only",
             "score": 0.8,
             "vector_score": 0.8,
             "metadata": {"chunk_id": "chunk-vector"},
-            "retrieval": {"sources": ["vector"], "vector_score": 0.8, "vector_rank": 2},
+            "retrieval": {
+                "sources": ["vector"],
+                "vector_score": 0.8,
+                "vector_rank": 2,
+            },
         },
     ]
     keyword = [
@@ -166,7 +210,11 @@ def test_weighted_fusion_uses_project_formula_and_dual_recall_bonus() -> None:
             "keyword_score": 1.0,
             "bm25_score": 8.2,
             "metadata": {"chunk_id": "chunk-shared"},
-            "retrieval": {"sources": ["keyword"], "keyword_score": 1.0, "keyword_rank": 1},
+            "retrieval": {
+                "sources": ["keyword"],
+                "keyword_score": 1.0,
+                "keyword_rank": 1,
+            },
         }
     ]
 
@@ -201,7 +249,9 @@ def test_parent_expansion_reads_only_same_parent_source_and_version() -> None:
                 "branch": "main",
             },
         )
-        for index, content in enumerate(["token setup", "refresh token failure", "retry once"])
+        for index, content in enumerate(
+            ["token setup", "refresh token failure", "retry once"]
+        )
     ]
     _document(
         db,
@@ -209,7 +259,12 @@ def test_parent_expansion_reads_only_same_parent_source_and_version() -> None:
         title="old branch",
         content="must not be expanded",
         source_id=source_id,
-        metadata={"chunk_id": "old", "parent_id": "parent-auth", "child_index": 2, "branch": "legacy"},
+        metadata={
+            "chunk_id": "old",
+            "parent_id": "parent-auth",
+            "child_index": 2,
+            "branch": "legacy",
+        },
     )
     db.commit()
 
@@ -229,7 +284,10 @@ def test_parent_expansion_reads_only_same_parent_source_and_version() -> None:
     )
 
     assert items[0]["parent_expanded"] is True
-    assert items[0]["_raw_content"] == "token setup\n\nrefresh token failure\n\nretry once"
+    assert (
+        items[0]["_raw_content"]
+        == "token setup\n\nrefresh token failure\n\nretry once"
+    )
     assert "must not be expanded" not in items[0]["_raw_content"]
     assert stage["additional_chunks"] == 2
 
@@ -241,35 +299,68 @@ def test_parent_expansion_reads_only_same_parent_source_and_version() -> None:
         (
             "这个怎么办",
             [
-                {"id": "a", "source_id": "one", "score": 0.9, "snippet": "第一种处理方式"},
-                {"id": "b", "source_id": "two", "score": 0.88, "snippet": "第二种处理方式"},
+                {
+                    "id": "a",
+                    "source_id": "one",
+                    "score": 0.9,
+                    "snippet": "第一种处理方式",
+                },
+                {
+                    "id": "b",
+                    "source_id": "two",
+                    "score": 0.88,
+                    "snippet": "第二种处理方式",
+                },
             ],
             "ask_clarification",
         ),
         (
             "是否允许部署",
             [
-                {"id": "a", "source_id": "one", "score": 0.92, "snippet": "当前版本允许部署。"},
-                {"id": "b", "source_id": "two", "score": 0.9, "snippet": "当前版本禁止部署。"},
+                {
+                    "id": "a",
+                    "source_id": "one",
+                    "score": 0.92,
+                    "snippet": "当前版本允许部署。",
+                },
+                {
+                    "id": "b",
+                    "source_id": "two",
+                    "score": 0.9,
+                    "snippet": "当前版本禁止部署。",
+                },
             ],
             "conflict",
         ),
         (
             "token refresh policy",
-            [{"id": "a", "source_id": "one", "score": 0.92, "snippet": "Refresh the token once."}],
+            [
+                {
+                    "id": "a",
+                    "source_id": "one",
+                    "score": 0.92,
+                    "snippet": "Refresh the token once.",
+                }
+            ],
             "answer",
         ),
     ],
 )
-def test_answer_gate_exposes_all_project_decisions(query, items, expected) -> None:
-    gate = evaluate_answer_gate(query, items, score_threshold=0.8, threshold_enabled=True)
+def test_answer_gate_exposes_all_project_decisions(
+    query, items, expected
+) -> None:
+    gate = evaluate_answer_gate(
+        query, items, score_threshold=0.8, threshold_enabled=True
+    )
 
     assert gate["decision"] == expected
     assert "reason" in gate
 
 
 @pytest.mark.asyncio
-async def test_qwen_rerank_receives_raw_content_before_compression(monkeypatch) -> None:
+async def test_qwen_rerank_receives_raw_content_before_compression(
+    monkeypatch,
+) -> None:
     db = _db_session()
     repo = _repo(db)
     candidate = {
@@ -277,7 +368,8 @@ async def test_qwen_rerank_receives_raw_content_before_compression(monkeypatch) 
         "source_id": str(uuid.uuid4()),
         "source_type": "knowledge_file",
         "title": "auth.md",
-        "_raw_content": "irrelevant setup. " * 80 + "Refresh the token once after ExpiredSignatureError.",
+        "_raw_content": "irrelevant setup. " * 80
+        + "Refresh the token once after ExpiredSignatureError.",
         "snippet": "short pre-rerank snippet",
         "score": 0.91,
         "metadata": {},
@@ -285,16 +377,32 @@ async def test_qwen_rerank_receives_raw_content_before_compression(monkeypatch) 
     }
 
     def fake_search(*_args, **kwargs):
-        kwargs["pipeline_trace"].update({"fusion_method": "weighted", "stages": []})
+        kwargs["pipeline_trace"].update(
+            {"fusion_method": "weighted", "stages": []}
+        )
         return [candidate]
 
     async def fake_qwen(_query, items, _config, _limit):
         assert items[0]["_raw_content"].startswith("irrelevant setup")
         assert "compression" not in items[0]
-        return [{**items[0], "score": 0.95, "rerank_score": 0.95, "retrieval": {**items[0]["retrieval"], "rerank_mode": "qwen_api"}}]
+        return [
+            {
+                **items[0],
+                "score": 0.95,
+                "rerank_score": 0.95,
+                "retrieval": {
+                    **items[0]["retrieval"],
+                    "rerank_mode": "qwen_api",
+                },
+            }
+        ]
 
-    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", fake_search)
-    monkeypatch.setattr("app.services.rag.knowledge_base._qwen_rerank", fake_qwen)
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base.search_similar_documents", fake_search
+    )
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base._qwen_rerank", fake_qwen
+    )
 
     items, trace, _duration = await retrieve_knowledge(
         db,
@@ -307,17 +415,27 @@ async def test_qwen_rerank_receives_raw_content_before_compression(monkeypatch) 
     assert items[0]["compression"]["mode"] == "query_aware_extractive"
     assert "ExpiredSignatureError" in items[0]["snippet"]
     stage_names = [stage["name"] for stage in trace["pipeline"]["stages"]]
-    assert stage_names == ["rerank", "parent_expansion", "score_threshold", "context_compression", "answer_gate"]
+    assert stage_names == [
+        "rerank",
+        "parent_expansion",
+        "score_threshold",
+        "context_compression",
+        "answer_gate",
+    ]
     assert trace["answer_gate"]["decision"] == "answer"
 
 
 @pytest.mark.asyncio
-async def test_qwen_failure_is_traced_and_falls_back_to_heuristic(monkeypatch) -> None:
+async def test_qwen_failure_is_traced_and_falls_back_to_heuristic(
+    monkeypatch,
+) -> None:
     db = _db_session()
     repo = _repo(db)
 
     def fake_search(*_args, **kwargs):
-        kwargs["pipeline_trace"].update({"fusion_method": "weighted", "stages": []})
+        kwargs["pipeline_trace"].update(
+            {"fusion_method": "weighted", "stages": []}
+        )
         return [
             {
                 "id": "auth",
@@ -335,8 +453,12 @@ async def test_qwen_failure_is_traced_and_falls_back_to_heuristic(monkeypatch) -
     async def fail_qwen(*_args, **_kwargs):
         raise TimeoutError("rerank timeout")
 
-    monkeypatch.setattr("app.services.rag.knowledge_base.search_similar_documents", fake_search)
-    monkeypatch.setattr("app.services.rag.knowledge_base._qwen_rerank", fail_qwen)
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base.search_similar_documents", fake_search
+    )
+    monkeypatch.setattr(
+        "app.services.rag.knowledge_base._qwen_rerank", fail_qwen
+    )
 
     items, trace, _duration = await retrieve_knowledge(
         db,
@@ -346,14 +468,20 @@ async def test_qwen_failure_is_traced_and_falls_back_to_heuristic(monkeypatch) -
         score_threshold_enabled=False,
     )
 
-    rerank_stage = next(stage for stage in trace["pipeline"]["stages"] if stage["name"] == "rerank")
+    rerank_stage = next(
+        stage
+        for stage in trace["pipeline"]["stages"]
+        if stage["name"] == "rerank"
+    )
     assert items[0]["retrieval"]["rerank_mode"] == "heuristic"
     assert rerank_stage["fallback"] is True
     assert rerank_stage["fallback_reason"] == "TimeoutError"
 
 
 @pytest.mark.asyncio
-async def test_retrieval_trace_contains_every_selected_pipeline_stage() -> None:
+async def test_retrieval_trace_contains_every_selected_pipeline_stage() -> (
+    None
+):
     db = _db_session()
     repo = _repo(db)
     _document(

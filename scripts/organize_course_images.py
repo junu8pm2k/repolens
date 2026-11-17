@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
 
-
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
 EXCLUDED_PARTS = {
     "demo code",
@@ -123,7 +122,9 @@ def article_image_directory(course_root: Path, article: Path) -> Path:
 
 
 def ensure_within(root: Path, path: Path) -> None:
-    if os.path.commonpath((root.resolve(), path.resolve())) != str(root.resolve()):
+    if os.path.commonpath((root.resolve(), path.resolve())) != str(
+        root.resolve()
+    ):
         raise ValueError(f"Path escapes course root: {path}")
 
 
@@ -134,9 +135,15 @@ def build_plan(course_root: Path) -> Plan:
         for path in course_root.rglob("*.md")
         if not is_excluded(path.relative_to(course_root))
     )
-    references = [reference for article in articles for reference in find_references(article)]
+    references = [
+        reference
+        for article in articles
+        for reference in find_references(article)
+    ]
 
-    missing = [reference for reference in references if not reference.source.is_file()]
+    missing = [
+        reference for reference in references if not reference.source.is_file()
+    ]
     if missing:
         details = "\n".join(
             f"{item.article}: {item.original_target}" for item in missing
@@ -153,19 +160,27 @@ def build_plan(course_root: Path) -> Plan:
     active_moves: list[Move] = []
     destination_sources: dict[str, Path] = {}
     for reference in references:
-        target = article_image_directory(course_root, reference.article) / reference.source.name
+        target = (
+            article_image_directory(course_root, reference.article)
+            / reference.source.name
+        )
         ensure_within(course_root, target)
         key = os.path.normcase(str(target))
         existing_source = destination_sources.get(key)
         if existing_source is not None and existing_source != reference.source:
             raise ValueError(
-                f"Active image collision at {target}: {existing_source} and {reference.source}"
+                (
+                    f"Active image collision at {target}: {existing_source} "
+                    f"and {reference.source}"
+                )
             )
         destination_sources[key] = reference.source
         if os.path.normcase(str(reference.source)) != key:
             active_moves.append(Move(reference.source, target))
 
-    active_sources = {os.path.normcase(str(reference.source)) for reference in references}
+    active_sources = {
+        os.path.normcase(str(reference.source)) for reference in references
+    }
     images = sorted(
         path.resolve()
         for path in course_root.rglob("*")
@@ -186,9 +201,14 @@ def build_plan(course_root: Path) -> Plan:
         key = os.path.normcase(str(move.target))
         prior = all_targets.get(key)
         if prior is not None and prior != move.source:
-            raise ValueError(f"Move collision at {move.target}: {prior} and {move.source}")
+            raise ValueError(
+                f"Move collision at {move.target}: {prior} and {move.source}"
+            )
         all_targets[key] = move.source
-        if move.target.exists() and move.target.resolve() != move.source.resolve():
+        if (
+            move.target.exists()
+            and move.target.resolve() != move.source.resolve()
+        ):
             raise ValueError(f"Move target already exists: {move.target}")
 
     return Plan(
@@ -201,7 +221,8 @@ def build_plan(course_root: Path) -> Plan:
 
 def target_by_source(plan: Plan) -> dict[str, Path]:
     targets = {
-        os.path.normcase(str(move.source)): move.target for move in plan.active_moves
+        os.path.normcase(str(move.source)): move.target
+        for move in plan.active_moves
     }
     for reference in plan.references:
         key = os.path.normcase(str(reference.source))
@@ -227,14 +248,20 @@ def updated_article_bytes(plan: Plan) -> dict[Path, bytes]:
     for article, references in by_article.items():
         text, has_bom = read_text_preserving_bom(article)
         revised = text
-        for reference in sorted(references, key=lambda item: item.path_start, reverse=True):
+        for reference in sorted(
+            references, key=lambda item: item.path_start, reverse=True
+        ):
             target = targets[os.path.normcase(str(reference.source))]
             replacement = replacement_target(
                 article,
                 target,
                 reference.original_target,
             )
-            revised = revised[: reference.path_start] + replacement + revised[reference.path_end :]
+            revised = (
+                revised[: reference.path_start]
+                + replacement
+                + revised[reference.path_end :]
+            )
         if revised != text:
             data = revised.encode("utf-8")
             if has_bom:
@@ -251,19 +278,21 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_archive_metadata(course_root: Path, orphan_moves: list[Move]) -> None:
+def write_archive_metadata(
+    course_root: Path, orphan_moves: list[Move]
+) -> None:
     archive_root = course_root / "_orphaned_images"
     archive_root.mkdir(parents=True, exist_ok=True)
     readme = archive_root / "README.md"
     readme.write_text(
-        "# 课程孤立图片归档\n\n"
-        "此目录保存整理时未被任何课程 Markdown 引用的图片。文件保持原相对路径，"
-        "便于追溯旧章节和旧素材来源。\n\n"
-        "- 归档日期：2026-07-30\n"
-        f"- 归档图片：{len(orphan_moves)} 张\n"
-        "- 使用规则：不要从课程正文直接引用这里的文件；确认仍有价值时，先移回对应"
-        "章节的 `images/<文章文件名>/`，再添加正文引用。\n"
-        "- 详细清单：`manifest.csv`\n",
+        (
+            f"# 课程孤立图片归档\n\n此目录保存整理时未被任何课程 Markdown 引用"
+            f"的图片。文件保持原相对路径，便于追溯旧章节和旧素材来源。\n\n- 归"
+            f"档日期：2026-07-30\n- 归档图片：{len(orphan_moves)} 张\n- 使用规"
+            f"则：不要从课程正文直接引用这里的文件；确认仍有价值时，先移回对应"
+            f"章节的 `images/<文章文件名>/`，再添加正文引用。\n- 详细清单：`"
+            f"manifest.csv`\n"
+        ),
         encoding="utf-8",
     )
 
@@ -294,7 +323,10 @@ def remove_empty_image_directories(course_root: Path) -> int:
     )
     for directory in directories:
         relative = directory.relative_to(course_root)
-        if "_orphaned_images" in relative.parts or "images" not in relative.parts:
+        if (
+            "_orphaned_images" in relative.parts
+            or "images" not in relative.parts
+        ):
             continue
         try:
             directory.rmdir()
@@ -328,18 +360,32 @@ def apply_plan(course_root: Path, plan: Plan) -> None:
         raise
 
 
-def verify(course_root: Path, expected_archive_count: int | None = None) -> None:
+def verify(
+    course_root: Path, expected_archive_count: int | None = None
+) -> None:
     plan = build_plan(course_root)
-    missing = [reference for reference in plan.references if not reference.source.is_file()]
+    missing = [
+        reference
+        for reference in plan.references
+        if not reference.source.is_file()
+    ]
     if missing:
-        raise ValueError(f"References missing after organization: {len(missing)}")
+        raise ValueError(
+            f"References missing after organization: {len(missing)}"
+        )
     if plan.active_moves:
         raise ValueError(
-            f"Referenced images outside their article directories: {len(plan.active_moves)}"
+            (
+                f"Referenced images outside their article directories: "
+                f"{len(plan.active_moves)}"
+            )
         )
     if plan.orphan_moves:
         raise ValueError(
-            f"Unreferenced images remain in active course directories: {len(plan.orphan_moves)}"
+            (
+                f"Unreferenced images remain in active course directories: "
+                f"{len(plan.orphan_moves)}"
+            )
         )
 
     archive_root = course_root / "_orphaned_images"
@@ -348,9 +394,15 @@ def verify(course_root: Path, expected_archive_count: int | None = None) -> None
         for path in archive_root.rglob("*")
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     ]
-    if expected_archive_count is not None and len(archived_images) != expected_archive_count:
+    if (
+        expected_archive_count is not None
+        and len(archived_images) != expected_archive_count
+    ):
         raise ValueError(
-            f"Expected {expected_archive_count} archived images, found {len(archived_images)}"
+            (
+                f"Expected {expected_archive_count} archived images, found "
+                f"{len(archived_images)}"
+            )
         )
     print(f"Verified article references: {len(plan.references)}")
     print(f"Verified active orphan images: {len(plan.orphan_moves)}")
@@ -362,12 +414,17 @@ def print_plan(plan: Plan) -> None:
     print(f"Image references: {len(plan.references)}")
     print(f"Referenced images to move: {len(plan.active_moves)}")
     print(f"Orphan images to archive: {len(plan.orphan_moves)}")
-    print("Target layout: chapter_xx/images/<article filename>/<image filename>")
+    print(
+        "Target layout: chapter_xx/images/<article filename>/<image filename>"
+    )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Organize course images by article and archive unreferenced images."
+        description=(
+            "Organize course images by article and archive unreferenced "
+            "images."
+        )
     )
     parser.add_argument(
         "--apply",

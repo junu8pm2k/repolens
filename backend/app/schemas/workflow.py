@@ -6,8 +6,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
-WorkflowTaskStatus = Literal["pending", "running", "success", "skipped", "error"]
+WorkflowTaskStatus = Literal[
+    "pending", "running", "success", "skipped", "error"
+]
 WorkflowFindingSeverity = Literal["info", "warning", "blocker"]
 
 
@@ -42,7 +43,9 @@ class WorkflowSpec(BaseModel):
     tasks: list[WorkflowTask] = Field(default_factory=list)
     max_parallel_tasks: int = Field(default=3, ge=1, le=8)
     requires_human_confirmation: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class WorkflowTaskResult(BaseModel):

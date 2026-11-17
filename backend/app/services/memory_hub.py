@@ -30,7 +30,9 @@ def record_recall_event(
     status: str = "success",
     metadata: dict[str, Any] | None = None,
 ) -> RecallEvent:
-    safe_results = [_recall_result_payload(item) for item in (results or [])[:12]]
+    safe_results = [
+        _recall_result_payload(item) for item in (results or [])[:12]
+    ]
     event = RecallEvent(
         repo_id=repo_id,
         conversation_id=conversation_id,
@@ -59,12 +61,20 @@ def list_recall_events(
     query = db.query(RecallEvent).filter(RecallEvent.repo_id == repo_id)
     if conversation_id:
         query = query.filter(RecallEvent.conversation_id == conversation_id)
-    rows = query.order_by(RecallEvent.created_at.desc()).limit(min(max(limit, 1), 100)).all()
+    rows = (
+        query.order_by(RecallEvent.created_at.desc())
+        .limit(min(max(limit, 1), 100))
+        .all()
+    )
     return [_recall_event_payload(row) for row in rows]
 
 
 def memory_status(db: Session, repo: Repository) -> dict[str, Any]:
-    index_state = db.query(ProjectIndexState).filter(ProjectIndexState.repo_id == repo.id).one_or_none()
+    index_state = (
+        db.query(ProjectIndexState)
+        .filter(ProjectIndexState.repo_id == repo.id)
+        .one_or_none()
+    )
     source_counts = dict(
         db.query(Document.source_type, func.count(Document.id))
         .filter(Document.repo_id == repo.id)
@@ -95,8 +105,12 @@ def memory_status(db: Session, repo: Repository) -> dict[str, Any]:
             "status": index_state.status if index_state else "missing",
             "docs_indexed": index_state.docs_indexed if index_state else 0,
             "docs_total": index_state.docs_total if index_state else 0,
-            "last_scan_at": index_state.last_scan_at.isoformat() if index_state and index_state.last_scan_at else None,
-            "error_message": index_state.error_message if index_state else None,
+            "last_scan_at": index_state.last_scan_at.isoformat()
+            if index_state and index_state.last_scan_at
+            else None,
+            "error_message": index_state.error_message
+            if index_state
+            else None,
             "summary_json": index_state.summary_json if index_state else None,
         },
         "documents": {
@@ -108,8 +122,12 @@ def memory_status(db: Session, repo: Repository) -> dict[str, Any]:
             "by_source_type": evidence_counts,
         },
         "recall": {
-            "total": db.query(RecallEvent).filter(RecallEvent.repo_id == repo.id).count(),
-            "latest_at": latest_recall.created_at.isoformat() if latest_recall and latest_recall.created_at else None,
+            "total": db.query(RecallEvent)
+            .filter(RecallEvent.repo_id == repo.id)
+            .count(),
+            "latest_at": latest_recall.created_at.isoformat()
+            if latest_recall and latest_recall.created_at
+            else None,
         },
         "candidates": {
             "total": sum(int(value) for value in candidate_counts.values()),
@@ -152,7 +170,10 @@ def capture_memory_candidates(
                 content=content,
                 status="pending",
                 source="session_sealer",
-                meta={"memory_update_key": kind, "captured_at": datetime.now(timezone.utc).isoformat()},
+                meta={
+                    "memory_update_key": kind,
+                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                },
             )
             db.add(candidate)
             created.append(candidate)
@@ -168,14 +189,22 @@ def list_memory_candidates(
     status: str | None = "pending",
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    query = db.query(MemoryCandidate).filter(MemoryCandidate.repo_id == repo_id)
+    query = db.query(MemoryCandidate).filter(
+        MemoryCandidate.repo_id == repo_id
+    )
     if status and status != "all":
         query = query.filter(MemoryCandidate.status == status)
-    rows = query.order_by(MemoryCandidate.created_at.desc()).limit(min(max(limit, 1), 100)).all()
+    rows = (
+        query.order_by(MemoryCandidate.created_at.desc())
+        .limit(min(max(limit, 1), 100))
+        .all()
+    )
     return [_candidate_payload(row) for row in rows]
 
 
-def approve_memory_candidate(db: Session, repo: Repository, candidate_id: uuid.UUID) -> tuple[MemoryCandidate, Document | None]:
+def approve_memory_candidate(
+    db: Session, repo: Repository, candidate_id: uuid.UUID
+) -> tuple[MemoryCandidate, Document | None]:
     candidate = _candidate_or_none(db, repo.id, candidate_id)
     if candidate is None:
         raise ValueError("candidate_not_found")
@@ -199,12 +228,17 @@ def approve_memory_candidate(db: Session, repo: Repository, candidate_id: uuid.U
     )
     candidate.status = "approved"
     candidate.reviewed_at = datetime.now(timezone.utc)
-    candidate.meta = {**(candidate.meta or {}), "approved_document_id": str(doc.id)}
+    candidate.meta = {
+        **(candidate.meta or {}),
+        "approved_document_id": str(doc.id),
+    }
     db.flush()
     return candidate, doc
 
 
-def reject_memory_candidate(db: Session, repo: Repository, candidate_id: uuid.UUID) -> MemoryCandidate:
+def reject_memory_candidate(
+    db: Session, repo: Repository, candidate_id: uuid.UUID
+) -> MemoryCandidate:
     candidate = _candidate_or_none(db, repo.id, candidate_id)
     if candidate is None:
         raise ValueError("candidate_not_found")
@@ -214,15 +248,22 @@ def reject_memory_candidate(db: Session, repo: Repository, candidate_id: uuid.UU
     return candidate
 
 
-def _candidate_or_none(db: Session, repo_id: uuid.UUID, candidate_id: uuid.UUID) -> MemoryCandidate | None:
+def _candidate_or_none(
+    db: Session, repo_id: uuid.UUID, candidate_id: uuid.UUID
+) -> MemoryCandidate | None:
     return (
         db.query(MemoryCandidate)
-        .filter(MemoryCandidate.repo_id == repo_id, MemoryCandidate.id == candidate_id)
+        .filter(
+            MemoryCandidate.repo_id == repo_id,
+            MemoryCandidate.id == candidate_id,
+        )
         .one_or_none()
     )
 
 
-def _candidate_exists(db: Session, repo_id: uuid.UUID, kind: str, content: str) -> bool:
+def _candidate_exists(
+    db: Session, repo_id: uuid.UUID, kind: str, content: str
+) -> bool:
     return (
         db.query(MemoryCandidate.id)
         .filter(
@@ -296,4 +337,8 @@ def _candidate_payload(row: MemoryCandidate) -> dict[str, Any]:
 
 def _clip(text: str, limit: int) -> str:
     cleaned = " ".join((text or "").split())
-    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rstrip() + "..."
+    return (
+        cleaned
+        if len(cleaned) <= limit
+        else cleaned[: limit - 1].rstrip() + "..."
+    )

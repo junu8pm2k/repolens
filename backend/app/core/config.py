@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001"
 
-    database_url: str = "postgresql+psycopg://repolens:repolens@localhost:5433/repolens"
+    database_url: str = (
+        "postgresql+psycopg://repolens:repolens@localhost:5433/repolens"
+    )
 
     github_token: str | None = None
     github_api_base_url: str = "https://api.github.com"
@@ -28,11 +30,16 @@ class Settings(BaseSettings):
     local_embedding_local_files_only: bool = False
     qwen_embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     dashscope_api_key: str | None = None
-    dashscope_embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_embedding_base_url: str = (
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
     rerank_api_key: str | None = None
     rerank_base_url: str | None = None
     qwen_rerank_model: str = "qwen3-rerank"
-    qwen_retrieval_instruction: str = "Given a user question, retrieve passages that contain the facts needed to answer it."
+    qwen_retrieval_instruction: str = (
+        "Given a user question, retrieve passages that contain the facts "
+        "needed to answer it."
+    )
 
     milvus_enabled: bool = True
     milvus_uri: str = "http://localhost:19530"
@@ -89,7 +96,9 @@ class Settings(BaseSettings):
     auto_sync_interval_seconds: int = 300
     auto_sync_limit: int = 50
 
-    model_config = SettingsConfigDict(env_file=("../.env", ".env"), env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=("../.env", ".env"), env_file_encoding="utf-8", extra="ignore"
+    )
 
 
 settings = Settings()

@@ -1,5 +1,5 @@
-import re
 import json
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,26 +9,26 @@ from langchain_core.messages import AIMessage
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.routes.evaluations import _eval_comparison, _issue_markdown
 from app.core.config import settings
 from app.db.models import Base, Conversation, Document, EvalRun, Repository
-from app.api.routes.evaluations import _eval_comparison, _issue_markdown
 from app.schemas.evals import EvalRunRequest
 from app.services.agents.chat_agent import ChatAgent
 from app.services.evals.ragas_runner import (
     CORE_RAGAS_METRICS,
     RagEvalCase,
     _default_cases,
+    _ensure_ragas_compatibility,
+    _evaluation_project_context,
     _hard_rules,
     _retrieval_metrics,
-    _evaluation_project_context,
-    _ensure_ragas_compatibility,
     _split_faithfulness_response,
     rescore_rag_result,
     retryable_ragas_metrics,
     run_rag_quality_eval,
 )
-from app.services.evals.suites import list_eval_suites, load_eval_suite
 from app.services.evals.runner import run_basic_eval
+from app.services.evals.suites import list_eval_suites, load_eval_suite
 from app.services.rag.vector_store import reset_milvus_store_cache
 
 
@@ -45,13 +45,22 @@ async def test_basic_eval_runner_returns_real_metrics() -> None:
 
 def test_ragas_collections_api_imports_with_current_langchain() -> None:
     _ensure_ragas_compatibility()
-    from ragas.metrics.collections import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
+    from ragas.metrics.collections import (
+        AnswerRelevancy,
+        ContextPrecision,
+        ContextRecall,
+        Faithfulness,
+    )
 
-    assert all([AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness])
+    assert all(
+        [AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness]
+    )
 
 
 def test_faithfulness_chunking_keeps_all_answer_content() -> None:
-    response = "第一条事实。\n" + ("第二条很长的事实内容" * 90) + "！\n最后一条事实。"
+    response = (
+        "第一条事实。\n" + ("第二条很长的事实内容" * 90) + "！\n最后一条事实。"
+    )
 
     chunks = _split_faithfulness_response(response, max_chars=120)
 
@@ -64,12 +73,21 @@ def test_default_ragas_cases_fall_back_to_structured_repository_data() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    repo = Repository(owner="local", name="fallback", full_name="local/fallback")
+    repo = Repository(
+        owner="local", name="fallback", full_name="local/fallback"
+    )
     db.add(repo)
     db.flush()
     from app.db.models import Issue
 
-    issue = Issue(repo_id=repo.id, number=7, title="Refresh token fails", body="Retry once with an idempotency key", state="open", labels=["bug"])
+    issue = Issue(
+        repo_id=repo.id,
+        number=7,
+        title="Refresh token fails",
+        body="Retry once with an idempotency key",
+        state="open",
+        labels=["bug"],
+    )
     db.add(issue)
     db.flush()
 
@@ -85,7 +103,9 @@ def test_fixed_eval_suite_resolves_repository_sources(tmp_path: Path) -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()
-    repo = Repository(owner="DemoOrg", name="RepoLens-AI", full_name="DemoOrg/RepoLens-AI")
+    repo = Repository(
+        owner="DemoOrg", name="RepoLens-AI", full_name="DemoOrg/RepoLens-AI"
+    )
     db.add(repo)
     db.flush()
     source_id = __import__("uuid").uuid4()
@@ -126,12 +146,17 @@ def test_fixed_eval_suite_resolves_repository_sources(tmp_path: Path) -> None:
     )
 
     suites = list_eval_suites(db, repo.id, suite_dir=suite_dir)
-    loaded = load_eval_suite(db, repo.id, "fixed-baseline", suite_dir=suite_dir)
+    loaded = load_eval_suite(
+        db, repo.id, "fixed-baseline", suite_dir=suite_dir
+    )
 
     assert suites[0]["ready"] is True
     assert suites[0]["recommended"] is True
     assert suites[0]["sha256"]
-    assert loaded.cases[0].expected_source_ids == [str(document.id), str(source_id)]
+    assert loaded.cases[0].expected_source_ids == [
+        str(document.id),
+        str(source_id),
+    ]
     assert loaded.cases[0].must_include == ["main"]
     assert loaded.cases[0].answer_regex == "^main$"
 
@@ -155,29 +180,46 @@ def test_hard_rules_enforce_required_forbidden_and_output_format() -> None:
     assert hard["answer_pattern_matched"] is False
 
 
-def test_chapter_suite_resolves_all_five_sources_in_the_selected_repo() -> None:
+def test_chapter_suite_resolves_all_five_sources_in_the_selected_repo() -> (
+    None
+):
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
-    docs_dir = Path(__file__).resolve().parents[3] / "docs" / "examples" / "rag_chapter_07"
+    docs_dir = (
+        Path(__file__).resolve().parents[3]
+        / "docs"
+        / "examples"
+        / "rag_chapter_07"
+    )
     docs = sorted(docs_dir.glob("*.md"))
     assert len(docs) == 5
     with sessionmaker(bind=engine)() as db:
-        repo = Repository(owner="local", name="course", full_name="local/course")
-        other = Repository(owner="local", name="other", full_name="local/other")
+        repo = Repository(
+            owner="local", name="course", full_name="local/course"
+        )
+        other = Repository(
+            owner="local", name="other", full_name="local/other"
+        )
         db.add_all([repo, other])
         db.flush()
         for path in docs:
-            db.add(Document(
-                repo_id=other.id if path == docs[-1] else repo.id,
-                source_type="knowledge_file",
-                source_id=uuid4(),
-                title=path.name,
-                content=path.read_text(encoding="utf-8"),
-                meta={"filename": path.name},
-            ))
+            db.add(
+                Document(
+                    repo_id=other.id if path == docs[-1] else repo.id,
+                    source_type="knowledge_file",
+                    source_id=uuid4(),
+                    title=path.name,
+                    content=path.read_text(encoding="utf-8"),
+                    meta={"filename": path.name},
+                )
+            )
         db.flush()
         suite_id = "chapter-07-quality-gate"
-        listed = next(suite for suite in list_eval_suites(db, repo.id) if suite["id"] == suite_id)
+        listed = next(
+            suite
+            for suite in list_eval_suites(db, repo.id)
+            if suite["id"] == suite_id
+        )
         assert listed["missing_sources"] == [docs[-1].name]
         with pytest.raises(ValueError, match="缺少已索引来源"):
             load_eval_suite(db, repo.id, suite_id)
@@ -188,33 +230,56 @@ def test_chapter_suite_resolves_all_five_sources_in_the_selected_repo() -> None:
         loaded = load_eval_suite(db, repo.id, suite_id)
         cases = {case.id: case for case in loaded.cases}
         assert len(cases) == 9
-        assert set(cases["cross-document-login-release"].expected_source_groups) == {docs[0].name, docs[1].name}
+        assert set(
+            cases["cross-document-login-release"].expected_source_groups
+        ) == {docs[0].name, docs[1].name}
         assert cases["unknown-revenue-target"].kind == "no_answer"
-        assert cases["conflicting-rollback-threshold"].conflict_values == ["2%", "5%"]
+        assert cases["conflicting-rollback-threshold"].conflict_values == [
+            "2%",
+            "5%",
+        ]
 
 
-def test_conflict_gate_requires_every_document_and_the_exact_thresholds() -> None:
+def test_conflict_gate_requires_every_document_and_the_exact_thresholds() -> (
+    None
+):
     case = RagEvalCase(
         question="阈值是否冲突？",
         reference="现行 2%，废弃 5%。",
         expected_source_ids=["current", "obsolete"],
-        expected_source_groups={"current.md": ["current"], "obsolete.md": ["obsolete"]},
+        expected_source_groups={
+            "current.md": ["current"],
+            "obsolete.md": ["obsolete"],
+        },
         conflict_values=["2%", "5%"],
         kind="conflict",
     )
-    duplicate = [{"id": "chunk-1", "source_id": "current"}, {"id": "chunk-2", "source_id": "current"}]
+    duplicate = [
+        {"id": "chunk-1", "source_id": "current"},
+        {"id": "chunk-2", "source_id": "current"},
+    ]
     sources = [*duplicate, {"id": "chunk-3", "source_id": "obsolete"}]
     answer = {"answer": "现行为 ２％，废弃值为 5 %。"}
     hard = _hard_rules(case, answer, duplicate, ["evidence"])
     assert hard["passed"] is False
     assert hard["missing_sources"] == ["obsolete.md"]
     assert _hard_rules(case, answer, sources, ["evidence"])["passed"] is True
-    wrong_value = _hard_rules(case, {"answer": "现行 12%，废弃 0.5%。"}, sources, ["evidence"])
+    wrong_value = _hard_rules(
+        case, {"answer": "现行 12%，废弃 0.5%。"}, sources, ["evidence"]
+    )
     assert wrong_value["missing_conflict_values"] == ["2%", "5%"]
-    assert _retrieval_metrics([case], [{"results": duplicate}], 2)["recall_at_k"] == 0.5
+    assert (
+        _retrieval_metrics([case], [{"results": duplicate}], 2)["recall_at_k"]
+        == 0.5
+    )
     assert _retrieval_metrics([case], [{"results": sources}], 3)["ndcg"] < 1.0
-    legacy = RagEvalCase(question="规则？", reference="规则", expected_source_ids=["current"])
-    assert _retrieval_metrics([legacy], [{"results": duplicate}], 2)["ndcg"] == 1.0
+    legacy = RagEvalCase(
+        question="规则？", reference="规则", expected_source_ids=["current"]
+    )
+    assert (
+        _retrieval_metrics([legacy], [{"results": duplicate}], 2)["ndcg"]
+        == 1.0
+    )
 
 
 def test_eval_project_context_matches_frontend_team_and_memory_shape() -> None:
@@ -271,7 +336,9 @@ class EvalAnswerModel:
         return self
 
     async def ainvoke(self, messages):
-        return AIMessage(content="Retries use an idempotency key and only retry once.")
+        return AIMessage(
+            content="Retries use an idempotency key and only retry once."
+        )
 
 
 class RecordingScorer:
@@ -308,13 +375,18 @@ class RetryScorer:
 
 
 @pytest.mark.asyncio
-async def test_rescore_reuses_saved_agent_evidence_and_only_retries_missing_metrics() -> None:
+async def test_rescore_reuses_evidence_and_retries_metrics() -> None:
     scorer = RetryScorer()
     source_result = {
         "target": {"repo_id": "repo-1"},
         "evaluation_set": {"name": "fixed", "sha256": "abc"},
         "pipeline": {"top_k": 5},
-        "retrieval": {"recall_at_k": 1.0, "precision_at_k": 1.0, "mrr": 1.0, "ndcg": 1.0},
+        "retrieval": {
+            "recall_at_k": 1.0,
+            "precision_at_k": 1.0,
+            "mrr": 1.0,
+            "ndcg": 1.0,
+        },
         "performance": {"cases": 1, "avg_latency_ms": 100},
         "cases": [
             {
@@ -327,7 +399,12 @@ async def test_rescore_reuses_saved_agent_evidence_and_only_retries_missing_metr
                 "tool_calls": [],
                 "tool_observations": [],
                 "expected_tool_calls": [],
-                "hard_rules": {"passed": True, "source_hit": True, "contexts_present": True, "answer_present": True},
+                "hard_rules": {
+                    "passed": True,
+                    "source_hit": True,
+                    "contexts_present": True,
+                    "answer_present": True,
+                },
                 "ragas": {
                     "context_precision": 1.0,
                     "context_recall": 1.0,
@@ -339,7 +416,9 @@ async def test_rescore_reuses_saved_agent_evidence_and_only_retries_missing_metr
         ],
     }
 
-    rescored = await rescore_rag_result(source_result, eval_id="eval-1", scorer=scorer)
+    rescored = await rescore_rag_result(
+        source_result, eval_id="eval-1", scorer=scorer
+    )
 
     assert scorer.metric_names == {"faithfulness"}
     assert rescored["run_mode"] == "rescore"
@@ -351,7 +430,9 @@ async def test_rescore_reuses_saved_agent_evidence_and_only_retries_missing_metr
     assert rescored["status"] == "passed"
 
 
-def test_eval_comparison_requires_same_baseline_and_reports_regressions() -> None:
+def test_eval_comparison_requires_same_baseline_and_reports_regressions() -> (
+    None
+):
     shared = {
         "evaluation_set": {"name": "fixed", "sha256": "abc"},
         "ragas": {"version": "0.4.3", "judge_model": "judge"},
@@ -365,7 +446,13 @@ def test_eval_comparison_requires_same_baseline_and_reports_regressions() -> Non
             "passed": True,
             "quality_status": "passed",
             "summary_metrics": {"faithfulness": 0.95},
-            "cases": [{"id": "case-1", "hard_rules": {"passed": True}, "ragas_errors": {}}],
+            "cases": [
+                {
+                    "id": "case-1",
+                    "hard_rules": {"passed": True},
+                    "ragas_errors": {},
+                }
+            ],
         },
     )
     candidate = EvalRun(
@@ -376,7 +463,11 @@ def test_eval_comparison_requires_same_baseline_and_reports_regressions() -> Non
             "quality_status": "failed",
             "summary_metrics": {"faithfulness": 0.80},
             "cases": [
-                {"id": "case-1", "hard_rules": {"passed": False}, "ragas_errors": {}},
+                {
+                    "id": "case-1",
+                    "hard_rules": {"passed": False},
+                    "ragas_errors": {},
+                },
             ],
         },
     )
@@ -385,7 +476,12 @@ def test_eval_comparison_requires_same_baseline_and_reports_regressions() -> Non
 
     assert comparison["comparable"] is True
     assert comparison["metric_deltas"] == [
-        {"name": "faithfulness", "base": 0.95, "candidate": 0.8, "delta": -0.15}
+        {
+            "name": "faithfulness",
+            "base": 0.95,
+            "candidate": 0.8,
+            "delta": -0.15,
+        }
     ]
     assert comparison["regressed_cases"] == 1
     assert comparison["release_gate_passed"] is False
@@ -422,7 +518,11 @@ def test_issue_draft_markdown_contains_reproduction_and_actions() -> None:
                     "response": "错误答案",
                     "ragas_errors": {"faithfulness": "TimeoutError"},
                     "diagnoses": [
-                        {"category": "judge", "title": "Judge 异常", "action": "仅重试异常评分"}
+                        {
+                            "category": "judge",
+                            "title": "Judge 异常",
+                            "action": "仅重试异常评分",
+                        }
                     ],
                 }
             ],
@@ -439,7 +539,9 @@ def test_issue_draft_markdown_contains_reproduction_and_actions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rag_quality_eval_runs_real_chatagent_and_rolls_back_eval_conversation(monkeypatch) -> None:
+async def test_eval_runs_agent_and_rolls_back_conversation(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "milvus_enabled", False)
     reset_milvus_store_cache()
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -454,7 +556,10 @@ async def test_rag_quality_eval_runs_real_chatagent_and_rolls_back_eval_conversa
         source_type="project_doc",
         source_id=source_id,
         title="Retry policy",
-        content="Authentication retries use an idempotency key and retry only once.",
+        content=(
+            "Authentication retries use an idempotency key and retry only "
+            "once."
+        ),
         meta={},
     )
     db.add(document)
@@ -485,8 +590,13 @@ async def test_rag_quality_eval_runs_real_chatagent_and_rolls_back_eval_conversa
     assert result["hard_gate"]["passed"] is True
     assert result["retrieval"]["recall_at_k"] == 1.0
     assert result["ragas"]["version"] == "test-ragas-0.4"
-    assert all(result["ragas"]["metrics"][name]["score"] is not None for name in CORE_RAGAS_METRICS)
-    assert scorer.calls[0]["response"].startswith("Retries use an idempotency key")
+    assert all(
+        result["ragas"]["metrics"][name]["score"] is not None
+        for name in CORE_RAGAS_METRICS
+    )
+    assert scorer.calls[0]["response"].startswith(
+        "Retries use an idempotency key"
+    )
     assert scorer.calls[0]["retrieved_contexts"]
     assert [event["stage"] for event in progress_events] == [
         "preparing",
@@ -495,11 +605,18 @@ async def test_rag_quality_eval_runs_real_chatagent_and_rolls_back_eval_conversa
         "case_complete",
         "finalizing",
     ]
-    assert db.query(Conversation).filter(Conversation.status == "evaluation").count() == 0
+    assert (
+        db.query(Conversation)
+        .filter(Conversation.status == "evaluation")
+        .count()
+        == 0
+    )
 
 
 @pytest.mark.asyncio
-async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(monkeypatch) -> None:
+async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(
+    monkeypatch,
+) -> None:
     from app.services.evals import ragas_runner
 
     async def run_case(db, repo, case, **kwargs):
@@ -507,14 +624,23 @@ async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(monkey
             return {"answer": "知识库缺少相关资料，无法确定。"}
         return {
             "answer": "答案。",
-            "evaluation_trace": {"retrievals": [{"contexts": ["证据"], "sources": [{"source_id": "source"}]}]},
+            "evaluation_trace": {
+                "retrievals": [
+                    {
+                        "contexts": ["证据"],
+                        "sources": [{"source_id": "source"}],
+                    }
+                ]
+            },
         }
 
     monkeypatch.setattr(ragas_runner, "_run_chatagent_case", run_case)
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(engine)
     with sessionmaker(bind=engine)() as db:
-        repo = Repository(owner="local", name="course", full_name="local/course")
+        repo = Repository(
+            owner="local", name="course", full_name="local/course"
+        )
         db.add(repo)
         db.flush()
         no_answer = RagEvalCase(
@@ -525,9 +651,20 @@ async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(monkey
             kind="no_answer",
             must_not_include=["亿元"],
         )
-        positive = RagEvalCase(id="positive", question="规则？", reference="答案。", expected_source_ids=["source"])
+        positive = RagEvalCase(
+            id="positive",
+            question="规则？",
+            reference="答案。",
+            expected_source_ids=["source"],
+        )
         scorer = RecordingScorer()
-        result = await run_rag_quality_eval(db, str(repo.id), cases=[no_answer, positive], scorer=scorer, run_judge=True)
+        result = await run_rag_quality_eval(
+            db,
+            str(repo.id),
+            cases=[no_answer, positive],
+            scorer=scorer,
+            run_judge=True,
+        )
 
     assert result["status"] == "passed"
     assert result["hard_gate"]["passed_cases"] == 2
@@ -539,7 +676,9 @@ async def test_no_answer_uses_hard_rules_without_incomplete_judge_scoring(monkey
     assert result["ragas"]["metrics"]["faithfulness"]["scored_cases"] == 1
     assert len(scorer.calls) == 1
     assert answer["ragas"]["faithfulness"] == 0.97
-    assert not _hard_rules(no_answer, {"answer": "预计 5 亿元。"}, [], [])["passed"]
+    assert not _hard_rules(no_answer, {"answer": "预计 5 亿元。"}, [], [])[
+        "passed"
+    ]
 
 
 @pytest.mark.asyncio
@@ -590,9 +729,14 @@ async def test_ragas_api_persists_summary_metrics(monkeypatch) -> None:
 
     await background_tasks()
     history = await evaluation_routes.list_evals(db=db, _user=object())
-    detail = await evaluation_routes.get_eval(response.eval_id, db=db, _user=object())
+    detail = await evaluation_routes.get_eval(
+        response.eval_id, db=db, _user=object()
+    )
 
     assert db.query(EvalRun).count() == 1
     assert history[0]["status"] == "failed"
-    assert history[0]["metrics"] == {"faithfulness": 0.62, "context_recall": 0.91}
+    assert history[0]["metrics"] == {
+        "faithfulness": 0.62,
+        "context_recall": 0.91,
+    }
     assert detail["status"] == "failed"

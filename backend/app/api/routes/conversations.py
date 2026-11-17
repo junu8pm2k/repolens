@@ -6,8 +6,15 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Repository
 from app.db.session import get_db
-from app.schemas.conversations import ConversationCreateRequest, ConversationResponse
-from app.services.conversations import create_conversation, delete_conversation, list_conversations
+from app.schemas.conversations import (
+    ConversationCreateRequest,
+    ConversationResponse,
+)
+from app.services.conversations import (
+    create_conversation,
+    delete_conversation,
+    list_conversations,
+)
 
 router = APIRouter()
 
@@ -19,8 +26,12 @@ def _repo_or_404(db: Session, repo_id: uuid.UUID) -> Repository:
     return repo
 
 
-@router.get("/{repo_id}/conversations", response_model=list[ConversationResponse])
-async def get_conversations(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> list[Any]:
+@router.get(
+    "/{repo_id}/conversations", response_model=list[ConversationResponse]
+)
+async def get_conversations(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> list[Any]:
     _repo_or_404(db, repo_id)
     conversations = list_conversations(db, repo_id)
     db.commit()
@@ -34,7 +45,9 @@ async def add_conversation(
     db: Session = Depends(get_db),
 ) -> Any:
     _repo_or_404(db, repo_id)
-    conversation = create_conversation(db, repo_id, payload.title if payload else None)
+    conversation = create_conversation(
+        db, repo_id, payload.title if payload else None
+    )
     db.commit()
     db.refresh(conversation)
     return conversation
@@ -60,8 +73,12 @@ async def remove_conversation(
                 "title": item.title,
                 "status": item.status,
                 "message_count": item.message_count,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-                "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                "created_at": item.created_at.isoformat()
+                if item.created_at
+                else None,
+                "updated_at": item.updated_at.isoformat()
+                if item.updated_at
+                else None,
             }
             for item in conversations
         ],

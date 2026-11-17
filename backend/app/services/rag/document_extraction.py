@@ -5,7 +5,6 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-
 MAX_DOCUMENT_BYTES = 12 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 4_000_000
 MAX_PDF_PAGES = 500
@@ -15,7 +14,9 @@ MAX_DOCX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 
 def _ensure_text_limit(text: str) -> str:
     if len(text) > MAX_EXTRACTED_CHARS:
-        raise ValueError(f"extracted text exceeds the {MAX_EXTRACTED_CHARS} character limit")
+        raise ValueError(
+            f"extracted text exceeds the {MAX_EXTRACTED_CHARS} character limit"
+        )
     return text
 
 
@@ -44,7 +45,12 @@ def _extract_pdf(data: bytes) -> str:
             content = f"<!-- page: {page_number} -->\n{text}"
             extracted_chars += len(content) + (2 if pages else 0)
             if extracted_chars > MAX_EXTRACTED_CHARS:
-                raise ValueError(f"PDF text exceeds the {MAX_EXTRACTED_CHARS} character limit")
+                raise ValueError(
+                    (
+                        f"PDF text exceeds the {MAX_EXTRACTED_CHARS} character"
+                        f" limit"
+                    )
+                )
             pages.append(content)
     return _ensure_text_limit("\n\n".join(pages))
 
@@ -53,7 +59,9 @@ def _paragraph_as_markdown(paragraph) -> str:
     text = (paragraph.text or "").strip()
     if not text:
         return ""
-    style_name = str(getattr(getattr(paragraph, "style", None), "name", "") or "")
+    style_name = str(
+        getattr(getattr(paragraph, "style", None), "name", "") or ""
+    )
     heading = re.match(r"heading\s+(\d+)", style_name, re.IGNORECASE)
     if heading:
         level = min(6, max(1, int(heading.group(1))))
@@ -67,16 +75,27 @@ def _paragraph_as_markdown(paragraph) -> str:
 
 
 def _table_as_markdown(table) -> str:
-    rows = [[cell.text.strip().replace("\n", " ") for cell in row.cells] for row in table.rows]
+    rows = [
+        [cell.text.strip().replace("\n", " ") for cell in row.cells]
+        for row in table.rows
+    ]
     if not rows:
         return ""
     width = max(len(row) for row in rows)
     normalized = [row + [""] * (width - len(row)) for row in rows]
 
     def render(row: list[str]) -> str:
-        return "| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |"
+        return (
+            "| " + " | ".join(cell.replace("|", "\\|") for cell in row) + " |"
+        )
 
-    return "\n".join([render(normalized[0]), render(["---"] * width), *(render(row) for row in normalized[1:])])
+    return "\n".join(
+        [
+            render(normalized[0]),
+            render(["---"] * width),
+            *(render(row) for row in normalized[1:]),
+        ]
+    )
 
 
 def _extract_docx(data: bytes) -> str:
@@ -84,11 +103,16 @@ def _extract_docx(data: bytes) -> str:
         with zipfile.ZipFile(BytesIO(data)) as archive:
             infos = archive.infolist()
             if len(infos) > MAX_DOCX_ENTRIES:
-                raise ValueError(f"DOCX exceeds the {MAX_DOCX_ENTRIES} entry limit")
+                raise ValueError(
+                    f"DOCX exceeds the {MAX_DOCX_ENTRIES} entry limit"
+                )
             uncompressed_size = sum(info.file_size for info in infos)
             if uncompressed_size > MAX_DOCX_UNCOMPRESSED_BYTES:
                 raise ValueError(
-                    f"DOCX expanded size exceeds the {MAX_DOCX_UNCOMPRESSED_BYTES} byte limit"
+                    (
+                        f"DOCX expanded size exceeds the "
+                        f"{MAX_DOCX_UNCOMPRESSED_BYTES} byte limit"
+                    )
                 )
             if any(info.flag_bits & 0x1 for info in infos):
                 raise ValueError("encrypted DOCX files are not supported")
@@ -114,7 +138,12 @@ def _extract_docx(data: bytes) -> str:
         if content:
             extracted_chars += len(content) + (2 if blocks else 0)
             if extracted_chars > MAX_EXTRACTED_CHARS:
-                raise ValueError(f"DOCX text exceeds the {MAX_EXTRACTED_CHARS} character limit")
+                raise ValueError(
+                    (
+                        f"DOCX text exceeds the {MAX_EXTRACTED_CHARS} "
+                        f"character limit"
+                    )
+                )
             blocks.append(content)
     return _ensure_text_limit("\n\n".join(blocks))
 

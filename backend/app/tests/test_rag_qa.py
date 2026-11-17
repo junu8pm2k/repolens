@@ -11,7 +11,9 @@ def test_deterministic_embedding_handles_chinese_without_spaces() -> None:
     relevant = deterministic_embedding("员工年假审批流程和请假规定", 128)
     unrelated = deterministic_embedding("数据库连接池监控告警", 128)
 
-    assert cosine_similarity(question, relevant) > cosine_similarity(question, unrelated)
+    assert cosine_similarity(question, relevant) > cosine_similarity(
+        question, unrelated
+    )
 
 
 def test_build_sources_hides_server_file_path() -> None:
@@ -24,7 +26,10 @@ def test_build_sources_hides_server_file_path() -> None:
                 "title": "handbook.md#1",
                 "snippet": "年假需要先在系统中提交审批。",
                 "score": 0.91,
-                "metadata": {"filename": "handbook.md", "stored_path": "C:/private/upload/handbook.md"},
+                "metadata": {
+                    "filename": "handbook.md",
+                    "stored_path": "C:/private/upload/handbook.md",
+                },
             }
         ]
     )
@@ -35,7 +40,9 @@ def test_build_sources_hides_server_file_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_answer_question_uses_llm_and_returns_numbered_sources(monkeypatch) -> None:
+async def test_answer_question_uses_llm_and_returns_numbered_sources(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "llm_api_key", "test-key")
     monkeypatch.setattr(
         "app.services.rag.qa.search_similar_documents",
@@ -53,12 +60,19 @@ async def test_answer_question_uses_llm_and_returns_numbered_sources(monkeypatch
     )
 
     class FakeLLM:
-        async def chat_text(self, system_prompt: str, user_message: str) -> str:
+        async def chat_text(
+            self, system_prompt: str, user_message: str
+        ) -> str:
             assert "只能依据" in system_prompt
             assert "[资料 1]" in user_message
             return "访问令牌过期后应使用刷新令牌重试一次。[1]"
 
-    result = await answer_question(object(), "00000000-0000-0000-0000-000000000001", "登录过期后怎么办？", llm=FakeLLM())
+    result = await answer_question(
+        object(),
+        "00000000-0000-0000-0000-000000000001",
+        "登录过期后怎么办？",
+        llm=FakeLLM(),
+    )
 
     assert result["generation_mode"] == "llm"
     assert result["retrieval_count"] == 1
@@ -67,7 +81,9 @@ async def test_answer_question_uses_llm_and_returns_numbered_sources(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_answer_question_has_offline_extractive_fallback(monkeypatch) -> None:
+async def test_answer_question_has_offline_extractive_fallback(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "llm_api_key", None)
     monkeypatch.setattr(
         "app.services.rag.qa.search_similar_documents",
@@ -77,14 +93,19 @@ async def test_answer_question_has_offline_extractive_fallback(monkeypatch) -> N
                 "source_id": "source-1",
                 "source_type": "knowledge_file",
                 "title": "leave.md#1",
-                "snippet": "员工申请年假时，需要先提交直属主管审批。审批通过后同步到考勤系统。",
+                ("snippet"): (
+                    "员工申请年假时，需要先提交直属主管审批。审批通过后同"
+                    "步到考勤系统。"
+                ),
                 "score": 0.88,
                 "metadata": {},
             }
         ],
     )
 
-    result = await answer_question(object(), "00000000-0000-0000-0000-000000000001", "年假怎么审批？")
+    result = await answer_question(
+        object(), "00000000-0000-0000-0000-000000000001", "年假怎么审批？"
+    )
 
     assert result["generation_mode"] == "extractive"
     assert "主管审批" in result["answer"]
@@ -92,7 +113,9 @@ async def test_answer_question_has_offline_extractive_fallback(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_answer_question_does_not_call_llm_when_gate_rejects_evidence(monkeypatch) -> None:
+async def test_answer_question_does_not_call_llm_when_gate_rejects_evidence(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "llm_api_key", "test-key")
 
     async def fake_retrieve(*_args, **_kwargs):
@@ -109,19 +132,30 @@ async def test_answer_question_does_not_call_llm_when_gate_rejects_evidence(monk
                     "retrieval": {"answer_gate": "conflict"},
                 }
             ],
-            {"answer_gate": {"decision": "conflict", "reason": "高排名证据给出了相反结论"}},
+            {
+                "answer_gate": {
+                    "decision": "conflict",
+                    "reason": "高排名证据给出了相反结论",
+                }
+            },
             1,
         )
 
-    monkeypatch.setattr("app.services.rag.qa.retrieve_knowledge", fake_retrieve)
+    monkeypatch.setattr(
+        "app.services.rag.qa.retrieve_knowledge", fake_retrieve
+    )
 
     class FakeDB:
         def query(self):
             raise AssertionError("retrieve_knowledge is mocked")
 
     class FailingLLM:
-        async def chat_text(self, _system_prompt: str, _user_message: str) -> str:
-            raise AssertionError("LLM must not run when the answer gate rejects evidence")
+        async def chat_text(
+            self, _system_prompt: str, _user_message: str
+        ) -> str:
+            raise AssertionError(
+                "LLM must not run when the answer gate rejects evidence"
+            )
 
     result = await answer_question(
         FakeDB(),

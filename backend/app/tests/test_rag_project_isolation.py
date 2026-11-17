@@ -66,7 +66,10 @@ def test_chat_agent_overwrites_model_supplied_mcp_scope() -> None:
         },
         {
             "message": "token failure",
-            "context": {"repo_id": repo_id, "conversation_id": conversation_id},
+            "context": {
+                "repo_id": repo_id,
+                "conversation_id": conversation_id,
+            },
         },
     )
 
@@ -121,10 +124,15 @@ def test_milvus_search_applies_repo_filter_to_every_query() -> None:
 
     assert [item["id"] for item in a_results] == ["doc-a"]
     assert [item["id"] for item in b_results] == ["doc-b"]
-    assert client.filters == [f'repo_id == "{repo_a}"', f'repo_id == "{repo_b}"']
+    assert client.filters == [
+        f'repo_id == "{repo_a}"',
+        f'repo_id == "{repo_b}"',
+    ]
 
 
-def test_rag_is_bound_to_real_repositories_and_has_no_virtual_creator() -> None:
+def test_rag_is_bound_to_real_repositories_and_has_no_virtual_creator() -> (
+    None
+):
     db = _db_session()
     actual = Repository(owner="team", name="actual", full_name="team/actual")
     legacy = Repository(
@@ -142,6 +150,12 @@ def test_rag_is_bound_to_real_repositories_and_has_no_virtual_creator() -> None:
     assert rejected.value.status_code == 404
     assert [repo.id for repo in asyncio.run(list_repos(db))] == [actual.id]
 
-    routes = {(route.path, frozenset(route.methods or set())) for route in rag_routes.router.routes}
+    routes = {
+        (route.path, frozenset(route.methods or set()))
+        for route in rag_routes.router.routes
+    }
     assert ("/repositories", frozenset({"GET"})) in routes
-    assert not any(path == "/knowledge-bases" and "POST" in methods for path, methods in routes)
+    assert not any(
+        path == "/knowledge-bases" and "POST" in methods
+        for path, methods in routes
+    )

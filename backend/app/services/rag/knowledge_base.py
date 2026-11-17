@@ -1,5 +1,5 @@
-import importlib.util
 import asyncio
+import importlib.util
 import time
 import uuid
 from datetime import datetime, timezone
@@ -10,8 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import KnowledgeBaseConfig, Repository, RetrievalTestRun
-from app.services.context_compression import compress_retrieval_results, estimate_tokens
-from app.services.rag.answer_gate import evaluate_answer_gate, is_repository_overview_query
+from app.services.context_compression import (
+    compress_retrieval_results,
+    estimate_tokens,
+)
+from app.services.rag.answer_gate import (
+    evaluate_answer_gate,
+    is_repository_overview_query,
+)
 from app.services.rag.embeddings import (
     embed_knowledge_query,
     embedding_contract,
@@ -19,17 +25,29 @@ from app.services.rag.embeddings import (
     validate_embedding_contract,
 )
 from app.services.rag.rerank import rerank_documents
-from app.services.rag.retrieval import expand_parent_context, search_similar_documents
-from app.services.rag.source_policy import normalize_source_types, should_vectorize
+from app.services.rag.retrieval import (
+    expand_parent_context,
+    search_similar_documents,
+)
+from app.services.rag.source_policy import (
+    normalize_source_types,
+    should_vectorize,
+)
 
 
 def as_uuid(value: str | uuid.UUID) -> uuid.UUID:
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
-def get_or_create_config(db: Session, repo_id: str | uuid.UUID, *, commit: bool = True) -> KnowledgeBaseConfig:
+def get_or_create_config(
+    db: Session, repo_id: str | uuid.UUID, *, commit: bool = True
+) -> KnowledgeBaseConfig:
     repo_uuid = as_uuid(repo_id)
-    config = db.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.repo_id == repo_uuid).one_or_none()
+    config = (
+        db.query(KnowledgeBaseConfig)
+        .filter(KnowledgeBaseConfig.repo_id == repo_uuid)
+        .one_or_none()
+    )
     if config is None:
         contract = embedding_contract()
         config = KnowledgeBaseConfig(
@@ -69,8 +87,13 @@ def config_dict(config: KnowledgeBaseConfig) -> dict[str, Any]:
 
 
 def model_catalog() -> dict[str, Any]:
-    sentence_transformers_ready = importlib.util.find_spec("sentence_transformers") is not None
-    qwen_api_ready = bool((settings.rerank_api_key or settings.dashscope_api_key) and settings.rerank_base_url)
+    sentence_transformers_ready = (
+        importlib.util.find_spec("sentence_transformers") is not None
+    )
+    qwen_api_ready = bool(
+        (settings.rerank_api_key or settings.dashscope_api_key)
+        and settings.rerank_base_url
+    )
     contract = embedding_contract()
     provider = normalize_embedding_provider(str(contract["provider"]))
     if provider in {"qwen_local", "local"}:
@@ -78,7 +101,9 @@ def model_catalog() -> dict[str, Any]:
     elif provider == "dashscope":
         embedding_available = bool(settings.dashscope_api_key)
     elif provider == "openai_compatible":
-        embedding_available = bool(settings.embedding_api_key or settings.llm_api_key)
+        embedding_available = bool(
+            settings.embedding_api_key or settings.llm_api_key
+        )
     else:
         embedding_available = provider == "deterministic"
     return {
@@ -125,7 +150,8 @@ def runtime_status(config: KnowledgeBaseConfig) -> dict[str, Any]:
         (
             item
             for item in catalog["embedding_models"]
-            if item["provider"] == config.embedding_provider and item["model"] == config.embedding_model
+            if item["provider"] == config.embedding_provider
+            and item["model"] == config.embedding_model
         ),
         None,
     )
@@ -133,7 +159,8 @@ def runtime_status(config: KnowledgeBaseConfig) -> dict[str, Any]:
         (
             item
             for item in catalog["rerank_models"]
-            if item["provider"] == config.rerank_provider and item["model"] == config.rerank_model
+            if item["provider"] == config.rerank_provider
+            and item["model"] == config.rerank_model
         ),
         None,
     )
@@ -165,7 +192,9 @@ async def _qwen_rerank(
     base_url = (settings.rerank_base_url or "").rstrip("/")
     if not api_key or not base_url:
         raise RuntimeError("Qwen rerank API is not configured")
-    endpoint = base_url if base_url.endswith("/reranks") else f"{base_url}/reranks"
+    endpoint = (
+        base_url if base_url.endswith("/reranks") else f"{base_url}/reranks"
+    )
     documents = [
         "\n".join(
             part
@@ -192,7 +221,11 @@ async def _qwen_rerank(
         )
         response.raise_for_status()
         payload = response.json()
-    rows = payload.get("results") or payload.get("output", {}).get("results") or []
+    rows = (
+        payload.get("results")
+        or payload.get("output", {}).get("results")
+        or []
+    )
     ranked: list[dict[str, Any]] = []
     for row in rows:
         index = int(row.get("index", -1))
@@ -238,12 +271,22 @@ async def retrieve_knowledge(
         repository = db.get(Repository, as_uuid(repo_id))
         if repository is not None:
             repository_name = repository.name
-            retrieval_query = f"{repository_name} 项目的用途、定位和核心功能是什么？"
+            retrieval_query = (
+                f"{repository_name} 项目的用途、定位和核心功能是什么？"
+            )
     resolved_top_k = min(max(top_k or config.top_k, 1), 20)
     method = retrieval_method or config.retrieval_method
-    use_rerank = config.rerank_enabled if rerank_enabled is None else rerank_enabled
-    threshold_on = config.score_threshold_enabled if score_threshold_enabled is None else score_threshold_enabled
-    threshold = config.score_threshold if score_threshold is None else score_threshold
+    use_rerank = (
+        config.rerank_enabled if rerank_enabled is None else rerank_enabled
+    )
+    threshold_on = (
+        config.score_threshold_enabled
+        if score_threshold_enabled is None
+        else score_threshold_enabled
+    )
+    threshold = (
+        config.score_threshold if score_threshold is None else score_threshold
+    )
 
     requested_source_types = normalize_source_types(source_types)
     effective_source_types = requested_source_types or None
@@ -259,7 +302,9 @@ async def retrieve_knowledge(
             model=config.embedding_model,
             dimensions=config.embedding_dimensions,
         )
-    candidate_limit = min(max(resolved_top_k * (8 if use_rerank else 2), 20), 100)
+    candidate_limit = min(
+        max(resolved_top_k * (8 if use_rerank else 2), 20), 100
+    )
     pipeline_trace: dict[str, Any] = {}
     items = search_similar_documents(
         db,
@@ -277,12 +322,16 @@ async def retrieve_knowledge(
     rerank_stage: dict[str, Any] = {
         "name": "rerank",
         "input_count": len(items),
-        "requested": "qwen_api" if use_rerank and config.rerank_provider == "qwen_api" else "heuristic",
+        "requested": "qwen_api"
+        if use_rerank and config.rerank_provider == "qwen_api"
+        else "heuristic",
     }
     if use_rerank and items:
         if config.rerank_provider == "qwen_api":
             try:
-                items = await _qwen_rerank(query, items, config, resolved_top_k)
+                items = await _qwen_rerank(
+                    query, items, config, resolved_top_k
+                )
                 if not items:
                     raise RuntimeError("Qwen rerank returned no valid results")
                 rerank_stage.update({"mode": "qwen_api", "fallback": False})
@@ -299,20 +348,34 @@ async def retrieve_knowledge(
             items = rerank_documents(query, items, resolved_top_k)
             rerank_stage.update({"mode": "heuristic", "fallback": False})
     elif use_rerank:
-        rerank_stage.update({"mode": "not_run", "fallback": False, "reason": "no candidates"})
+        rerank_stage.update(
+            {"mode": "not_run", "fallback": False, "reason": "no candidates"}
+        )
     else:
         rerank_stage.update({"mode": "disabled", "fallback": False})
     items = items[:resolved_top_k]
-    pipeline_trace.setdefault("stages", []).append({**rerank_stage, "output_count": len(items)})
+    pipeline_trace.setdefault("stages", []).append(
+        {**rerank_stage, "output_count": len(items)}
+    )
 
-    items, parent_stage = expand_parent_context(db, repo_id, items, neighbor_window=1)
+    items, parent_stage = expand_parent_context(
+        db, repo_id, items, neighbor_window=1
+    )
     pipeline_trace["stages"].append(parent_stage)
 
     before_threshold = len(items)
-    top_candidate_score = max((float(item.get("score") or 0.0) for item in items), default=0.0)
+    top_candidate_score = max(
+        (float(item.get("score") or 0.0) for item in items), default=0.0
+    )
     if threshold_on:
-        items = [item for item in items if float(item.get("score") or 0.0) >= threshold]
-    threshold_rejected_all = threshold_on and before_threshold > 0 and not items
+        items = [
+            item
+            for item in items
+            if float(item.get("score") or 0.0) >= threshold
+        ]
+    threshold_rejected_all = (
+        threshold_on and before_threshold > 0 and not items
+    )
     pipeline_trace["stages"].append(
         {
             "name": "score_threshold",
@@ -332,7 +395,9 @@ async def retrieve_knowledge(
         max_tokens_per_item=260,
         max_total_tokens=context_budget_tokens,
     )
-    compressed_tokens = sum(estimate_tokens(str(item.get("snippet") or "")) for item in items)
+    compressed_tokens = sum(
+        estimate_tokens(str(item.get("snippet") or "")) for item in items
+    )
     pipeline_trace["stages"].append(
         {
             "name": "context_compression",

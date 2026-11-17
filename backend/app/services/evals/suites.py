@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from app.db.models import Document, Repository
 from app.services.evals.ragas_runner import RagEvalCase
 
-
-DEFAULT_SUITE_DIR = Path(__file__).resolve().parents[4] / "docs" / "datas" / "evals"
+DEFAULT_SUITE_DIR = (
+    Path(__file__).resolve().parents[4] / "docs" / "datas" / "evals"
+)
 AUTO_SMOKE_SUITE_ID = "auto-document-smoke"
 
 
@@ -54,7 +55,13 @@ def _indexed_source_ids(db: Session, repo_id: Any) -> dict[str, list[str]]:
 
 def _case_source_files(item: dict[str, Any]) -> list[str]:
     files = [item.get("source_file"), *(item.get("source_files") or [])]
-    return list(dict.fromkeys(str(value).strip() for value in files if value and str(value).strip()))
+    return list(
+        dict.fromkeys(
+            str(value).strip()
+            for value in files
+            if value and str(value).strip()
+        )
+    )
 
 
 def _suite_applies_to_repo(payload: dict[str, Any], repo: Repository) -> bool:
@@ -62,7 +69,10 @@ def _suite_applies_to_repo(payload: dict[str, Any], repo: Repository) -> bool:
     if not isinstance(names, list) or not names:
         return True
     accepted = {str(item).casefold() for item in names if str(item).strip()}
-    return repo.name.casefold() in accepted or repo.full_name.casefold() in accepted
+    return (
+        repo.name.casefold() in accepted
+        or repo.full_name.casefold() in accepted
+    )
 
 
 def _suite_metadata(
@@ -71,17 +81,21 @@ def _suite_metadata(
     sha256: str,
     source_ids: dict[str, list[str]],
 ) -> dict[str, Any]:
-    missing_sources = list(dict.fromkeys(
-        name
-        for item in payload["cases"]
-        for name in _case_source_files(item)
-        if Path(name).name.casefold() not in source_ids
-    ))
+    missing_sources = list(
+        dict.fromkeys(
+            name
+            for item in payload["cases"]
+            for name in _case_source_files(item)
+            if Path(name).name.casefold() not in source_ids
+        )
+    )
     return {
         "id": str(payload["name"]),
         "name": str(payload["name"]),
         "label": str(payload.get("label") or payload["name"]),
-        "description": str(payload.get("description") or "人工维护的固定回归评测集"),
+        "description": str(
+            payload.get("description") or "人工维护的固定回归评测集"
+        ),
         "schema_version": int(payload.get("schema_version") or 1),
         "case_count": len(payload["cases"]),
         "sha256": sha256,
@@ -108,14 +122,24 @@ def list_eval_suites(
         for path in sorted(suite_dir.glob("*.json")):
             payload, sha256 = _read_suite(path)
             if _suite_applies_to_repo(payload, repo):
-                suites.append(_suite_metadata(path, payload, sha256, source_ids))
-    suites.sort(key=lambda item: (not item["recommended"], not item["ready"], item["label"]))
+                suites.append(
+                    _suite_metadata(path, payload, sha256, source_ids)
+                )
+    suites.sort(
+        key=lambda item: (
+            not item["recommended"],
+            not item["ready"],
+            item["label"],
+        )
+    )
     suites.append(
         {
             "id": AUTO_SMOKE_SUITE_ID,
             "name": AUTO_SMOKE_SUITE_ID,
             "label": "自动文档冒烟测试",
-            "description": "从当前仓库文档临时出题，只验证链路能运行，不能作为发布基线。",
+            ("description"): (
+                "从当前仓库文档临时出题，只验证链路能运行，不能作为发布基线。"
+            ),
             "schema_version": 1,
             "case_count": None,
             "sha256": None,
@@ -142,7 +166,10 @@ def load_eval_suite(
                 "id": AUTO_SMOKE_SUITE_ID,
                 "name": AUTO_SMOKE_SUITE_ID,
                 "label": "自动文档冒烟测试",
-                "description": "从当前仓库文档临时出题，只验证链路能运行，不能作为发布基线。",
+                ("description"): (
+                    "从当前仓库文档临时出题，只验证链路能运行，不能作为发"
+                    "布基线。"
+                ),
                 "source": "auto_smoke",
                 "sha256": None,
                 "case_count": None,
@@ -155,7 +182,9 @@ def load_eval_suite(
         raise ValueError(f"Repository {repo_id} was not found")
     for path in sorted(suite_dir.glob("*.json")) if suite_dir.is_dir() else []:
         payload, sha256 = _read_suite(path)
-        if str(payload["name"]) != suite_id or not _suite_applies_to_repo(payload, repo):
+        if str(payload["name"]) != suite_id or not _suite_applies_to_repo(
+            payload, repo
+        ):
             continue
         source_ids = _indexed_source_ids(db, repo.id)
         metadata = _suite_metadata(path, payload, sha256, source_ids)
@@ -168,29 +197,55 @@ def load_eval_suite(
             question = str(item.get("question") or "").strip()
             reference = str(item.get("reference") or "").strip()
             if not question or not reference:
-                raise ValueError(f"评测集 {suite_id} 的 {case_id} 缺少 question 或 reference")
+                raise ValueError(
+                    (
+                        f"评测集 {suite_id} 的 {case_id} 缺少 question 或 "
+                        f"reference"
+                    )
+                )
             source_file = str(item.get("source_file") or "").strip()
             source_groups = {
                 name: source_ids[Path(name).name.casefold()]
                 for name in _case_source_files(item)
             }
-            expected_source_ids = list(dict.fromkeys(value for ids in source_groups.values() for value in ids))
+            expected_source_ids = list(
+                dict.fromkeys(
+                    value for ids in source_groups.values() for value in ids
+                )
+            )
             cases.append(
                 RagEvalCase(
                     id=case_id,
                     question=question,
                     reference=reference,
                     expected_source_ids=expected_source_ids,
-                    source_type=str(item.get("source_type") or "knowledge_file"),
-                    required_tools=[str(value) for value in item.get("required_tools") or []],
-                    expected_tool_calls=[dict(value) for value in item.get("expected_tool_calls") or []],
+                    source_type=str(
+                        item.get("source_type") or "knowledge_file"
+                    ),
+                    required_tools=[
+                        str(value)
+                        for value in item.get("required_tools") or []
+                    ],
+                    expected_tool_calls=[
+                        dict(value)
+                        for value in item.get("expected_tool_calls") or []
+                    ],
                     kind=str(item.get("kind") or "positive"),
-                    must_include=[str(value) for value in item.get("must_include") or []],
-                    must_not_include=[str(value) for value in item.get("must_not_include") or []],
-                    answer_regex=str(item.get("answer_regex") or "").strip() or None,
+                    must_include=[
+                        str(value) for value in item.get("must_include") or []
+                    ],
+                    must_not_include=[
+                        str(value)
+                        for value in item.get("must_not_include") or []
+                    ],
+                    answer_regex=str(item.get("answer_regex") or "").strip()
+                    or None,
                     source_file=source_file or None,
                     expected_source_groups=source_groups,
-                    conflict_values=[str(value) for value in item.get("conflict_values") or []],
+                    conflict_values=[
+                        str(value)
+                        for value in item.get("conflict_values") or []
+                    ],
                 )
             )
         metadata["case_count"] = len(cases)

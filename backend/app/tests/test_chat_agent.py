@@ -16,9 +16,15 @@ def test_native_tools_do_not_repeat_unrelated_argument_schemas():
         return {"answer": "ok"}
 
     agent = ChatAgent(model=object())
-    tools = agent._build_langchain_tools({name: tool for name in agent.available_tools}, {})
-    issue_fields = tools["repo__get_issue"].args_schema.model_json_schema()["properties"]
-    read_fields = tools["workspace__read_file"].args_schema.model_json_schema()["properties"]
+    tools = agent._build_langchain_tools(
+        {name: tool for name in agent.available_tools}, {}
+    )
+    issue_fields = tools["repo__get_issue"].args_schema.model_json_schema()[
+        "properties"
+    ]
+    read_fields = tools[
+        "workspace__read_file"
+    ].args_schema.model_json_schema()["properties"]
     assert "session_id" not in issue_fields
     assert "issue_id" not in read_fields
     assert agent._tool_schema_estimated_tokens({"tools": tools}) < 6000
@@ -29,8 +35,17 @@ def test_unbound_synthesis_does_not_count_tool_schemas():
         return {"answer": "ok"}
 
     agent = ChatAgent(model=object())
-    state = {"tools": agent._build_langchain_tools({"workspace.read_file": tool}, {})}
-    agent._record_prompt_diagnostics(state, phase="final_from_observations", system_prompt="Answer", user_prompt="Question")
+    state = {
+        "tools": agent._build_langchain_tools(
+            {"workspace.read_file": tool}, {}
+        )
+    }
+    agent._record_prompt_diagnostics(
+        state,
+        phase="final_from_observations",
+        system_prompt="Answer",
+        user_prompt="Question",
+    )
     assert state["prompt_diagnostics"][-1]["tool_schema_tokens"] == 0
 
 
@@ -48,17 +63,27 @@ class ScriptedToolModel:
             return AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "workspace__list_files", "args": {"path": ".", "limit": 5}, "id": "call_list"},
+                    {
+                        "name": "workspace__list_files",
+                        "args": {"path": ".", "limit": 5},
+                        "id": "call_list",
+                    },
                 ],
             )
         if self.calls == 2:
             return AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "workspace__read_file", "args": {"path": "README.md"}, "id": "call_read"},
+                    {
+                        "name": "workspace__read_file",
+                        "args": {"path": "README.md"},
+                        "id": "call_read",
+                    },
                 ],
             )
-        return AIMessage(content="README.md says this is the project overview.")
+        return AIMessage(
+            content="README.md says this is the project overview."
+        )
 
 
 class SummaryModel:
@@ -66,7 +91,9 @@ class SummaryModel:
         return self
 
     async def ainvoke(self, messages: list[Any]) -> AIMessage:
-        return AIMessage(content="The README says this project coordinates AI agents.")
+        return AIMessage(
+            content="The README says this project coordinates AI agents."
+        )
 
 
 class RecentRecallModel:
@@ -90,14 +117,22 @@ async def test_social_reply_does_not_bind_tools_or_send_their_schemas():
     async def unexpected_tool(*args, **kwargs):
         pytest.fail("A greeting must not invoke repository tools")
 
-    result = await ChatAgent(model=model).run({"message": "你好"}, {
-        "tools": {"workspace.read_file": unexpected_tool},
-        "compression_stats": {"pre_retrieval": {"enabled": False, "reason": "social_message"}},
-    })
+    result = await ChatAgent(model=model).run(
+        {"message": "你好"},
+        {
+            "tools": {"workspace.read_file": unexpected_tool},
+            "compression_stats": {
+                "pre_retrieval": {"enabled": False, "reason": "social_message"}
+            },
+        },
+    )
     assert model.calls == 1
     assert model.bind_tools_calls == 0
     assert result["tool_calls"] == []
-    assert result["context_diagnostics"]["prompt_calls"][0]["tool_schema_tokens"] == 0
+    assert (
+        result["context_diagnostics"]["prompt_calls"][0]["tool_schema_tokens"]
+        == 0
+    )
     assert result["model_usage"][0]["phase"] == "direct_chat"
 
 
@@ -127,7 +162,11 @@ class SingleToolModel:
             return AIMessage(
                 content="",
                 tool_calls=[
-                    {"name": "workspace__read_file", "args": {"path": "README.md"}, "id": "call_read"},
+                    {
+                        "name": "workspace__read_file",
+                        "args": {"path": "README.md"},
+                        "id": "call_read",
+                    },
                 ],
             )
         return AIMessage(content="The README has been read.")
@@ -146,7 +185,11 @@ class RepeatingToolModel:
         return AIMessage(
             content="",
             tool_calls=[
-                {"name": "workspace__read_file", "args": {"path": "README.md"}, "id": f"call_read_{self.calls}"},
+                {
+                    "name": "workspace__read_file",
+                    "args": {"path": "README.md"},
+                    "id": f"call_read_{self.calls}",
+                },
             ],
         )
 
@@ -183,7 +226,12 @@ class RewrittenRagModel:
                     }
                 ],
             )
-        return AIMessage(content="The history and retry decision agree: retry once with an idempotency key.")
+        return AIMessage(
+            content=(
+                "The history and retry decision agree: retry once with an "
+                "idempotency key."
+            )
+        )
 
 
 class UsageModel:
@@ -193,7 +241,11 @@ class UsageModel:
     async def ainvoke(self, messages: list[Any]) -> AIMessage:
         return AIMessage(
             content="usage captured",
-            usage_metadata={"input_tokens": 123, "output_tokens": 7, "total_tokens": 130},
+            usage_metadata={
+                "input_tokens": 123,
+                "output_tokens": 7,
+                "total_tokens": 130,
+            },
         )
 
 
@@ -211,7 +263,9 @@ class OverflowThenSuccessModel:
         return AIMessage(content="recovered after compact projection")
 
 
-def _history_context(*, complete_and_exact: bool, exact_suffix_messages: int = 3) -> dict[str, Any]:
+def _history_context(
+    *, complete_and_exact: bool, exact_suffix_messages: int = 3
+) -> dict[str, Any]:
     return {
         "server_messages": [
             {"role": "user", "content": "hi"},
@@ -233,7 +287,9 @@ def _history_context(*, complete_and_exact: bool, exact_suffix_messages: int = 3
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_records_provider_usage_and_prompt_breakdown() -> None:
+async def test_chat_agent_records_provider_usage_and_prompt_breakdown() -> (
+    None
+):
     final = await ChatAgent(model=UsageModel()).run(  # type: ignore[arg-type]
         {"message": "Give me a concise answer."},
         {"tools": {}},
@@ -258,10 +314,13 @@ async def test_context_overflow_retries_only_the_failed_model_call() -> None:
     assert final["answer"] == "recovered after compact projection"
     assert model.calls == 2
     assert final["context_diagnostics"]["reactive_overflow_retry"] is True
-    assert any(event["type"] == "context_overflow_recovery" for event in final["agent_events"])
+    assert any(
+        event["type"] == "context_overflow_recovery"
+        for event in final["agent_events"]
+    )
 
 
-def test_runtime_tool_projection_compacts_old_observations_without_mutating_audit_state() -> None:
+def test_tool_projection_preserves_audit_state() -> None:
     agent = ChatAgent(model=None)
     state = {
         "observations": [
@@ -279,20 +338,34 @@ def test_runtime_tool_projection_compacts_old_observations_without_mutating_audi
     prompt_observations, _events, stats = agent._runtime_tool_context(state)  # type: ignore[arg-type]
 
     assert stats["estimated_tokens_saved"] > 0
-    assert stats["prompt_observation_tokens"] <= stats["observation_budget_tokens"]
-    assert state["observations"][0]["observation"]["answer_preview"] == original
+    assert (
+        stats["prompt_observation_tokens"]
+        <= stats["observation_budget_tokens"]
+    )
+    assert (
+        state["observations"][0]["observation"]["answer_preview"] == original
+    )
     assert len(prompt_observations) >= 1
 
 
 @pytest.mark.asyncio
-async def test_recent_recall_uses_injected_history_without_memory_tool() -> None:
+async def test_recent_recall_uses_injected_history_without_memory_tool() -> (
+    None
+):
     model = RecentRecallModel()
     memory_tool_calls = 0
 
-    async def get_thread_context(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def get_thread_context(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal memory_tool_calls
         memory_tool_calls += 1
-        return {"route": "thread_context", "tool_calls": [], "answer": "user: hi", "citations": []}
+        return {
+            "route": "thread_context",
+            "tool_calls": [],
+            "answer": "user: hi",
+            "citations": [],
+        }
 
     final = await ChatAgent(model=model).run(  # type: ignore[arg-type]
         {"message": "我刚刚说了什么？"},
@@ -308,23 +381,33 @@ async def test_recent_recall_uses_injected_history_without_memory_tool() -> None
     assert memory_tool_calls == 0
     assert model.calls == 1
     assert model.bind_tools_calls == 0
-    policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
+    policy = next(
+        event
+        for event in final["agent_events"]
+        if event["type"] == "context_policy"
+    )
     assert policy["mode"] == "direct_recent_history"
     assert policy["reason"] == "exact_recent_messages_available"
 
 
 @pytest.mark.asyncio
-async def test_recent_recall_fetches_thread_context_when_prompt_history_is_incomplete() -> None:
+async def test_incomplete_history_fetches_thread_context() -> None:
     model = RecentRecallModel()
     memory_tool_calls = 0
 
-    async def get_thread_context(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def get_thread_context(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal memory_tool_calls
         memory_tool_calls += 1
         return {
             "route": "thread_context",
             "tool_calls": [
-                {"tool_name": "repolens_get_thread_context", "arguments": input_data, "status": "success"}
+                {
+                    "tool_name": "repolens_get_thread_context",
+                    "arguments": input_data,
+                    "status": "success",
+                }
             ],
             "answer": "user: hi",
             "citations": [],
@@ -333,15 +416,26 @@ async def test_recent_recall_fetches_thread_context_when_prompt_history_is_incom
     final = await ChatAgent(model=model).run(  # type: ignore[arg-type]
         {"message": "我刚刚说了什么？"},
         {
-            **_history_context(complete_and_exact=False, exact_suffix_messages=1),
+            **_history_context(
+                complete_and_exact=False, exact_suffix_messages=1
+            ),
             "tools": {"repolens_get_thread_context": get_thread_context},
         },
     )
 
     assert memory_tool_calls == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["repolens_get_thread_context"]
-    assert not any(call["tool_name"] == "repolens_search_evidence" for call in final["tool_calls"])
-    policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
+    assert [call["tool_name"] for call in final["tool_calls"]] == [
+        "repolens_get_thread_context"
+    ]
+    assert not any(
+        call["tool_name"] == "repolens_search_evidence"
+        for call in final["tool_calls"]
+    )
+    policy = next(
+        event
+        for event in final["agent_events"]
+        if event["type"] == "context_policy"
+    )
     assert policy["reason"] == "recent_history_incomplete"
 
 
@@ -349,13 +443,19 @@ async def test_recent_recall_fetches_thread_context_when_prompt_history_is_incom
 async def test_exact_recall_request_verifies_with_thread_context() -> None:
     invocations = 0
 
-    async def get_thread_context(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def get_thread_context(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal invocations
         invocations += 1
         return {
             "route": "thread_context",
             "tool_calls": [
-                {"tool_name": "repolens_get_thread_context", "arguments": input_data, "status": "success"}
+                {
+                    "tool_name": "repolens_get_thread_context",
+                    "arguments": input_data,
+                    "status": "success",
+                }
             ],
             "answer": "user: hi",
             "citations": [],
@@ -365,12 +465,21 @@ async def test_exact_recall_request_verifies_with_thread_context() -> None:
     context["server_messages"][-1]["content"] = "请逐字核实我刚刚说的原话"
     final = await ChatAgent(model=RecentRecallModel()).run(  # type: ignore[arg-type]
         {"message": "请逐字核实我刚刚说的原话"},
-        {**context, "tools": {"repolens_get_thread_context": get_thread_context}},
+        {
+            **context,
+            "tools": {"repolens_get_thread_context": get_thread_context},
+        },
     )
 
     assert invocations == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["repolens_get_thread_context"]
-    policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
+    assert [call["tool_name"] for call in final["tool_calls"]] == [
+        "repolens_get_thread_context"
+    ]
+    policy = next(
+        event
+        for event in final["agent_events"]
+        if event["type"] == "context_policy"
+    )
     assert policy["reason"] == "exact_verification_requested"
 
 
@@ -378,13 +487,19 @@ async def test_exact_recall_request_verifies_with_thread_context() -> None:
 async def test_cross_session_recall_uses_session_events() -> None:
     invocations = 0
 
-    async def read_session_events(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_session_events(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal invocations
         invocations += 1
         return {
             "route": "session_events",
             "tool_calls": [
-                {"tool_name": "repolens_read_session_events", "arguments": input_data, "status": "success"}
+                {
+                    "tool_name": "repolens_read_session_events",
+                    "arguments": input_data,
+                    "status": "success",
+                }
             ],
             "answer": "上次会话决定使用短期令牌。",
             "citations": [],
@@ -394,12 +509,21 @@ async def test_cross_session_recall_uses_session_events() -> None:
     context["server_messages"][-1]["content"] = "上次会话我们决定了什么？"
     final = await ChatAgent(model=RecentRecallModel()).run(  # type: ignore[arg-type]
         {"message": "上次会话我们决定了什么？"},
-        {**context, "tools": {"repolens_read_session_events": read_session_events}},
+        {
+            **context,
+            "tools": {"repolens_read_session_events": read_session_events},
+        },
     )
 
     assert invocations == 1
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["repolens_read_session_events"]
-    policy = next(event for event in final["agent_events"] if event["type"] == "context_policy")
+    assert [call["tool_name"] for call in final["tool_calls"]] == [
+        "repolens_read_session_events"
+    ]
+    policy = next(
+        event
+        for event in final["agent_events"]
+        if event["type"] == "context_policy"
+    )
     assert policy["reason"] == "cross_session_request"
 
 
@@ -408,22 +532,44 @@ async def test_chat_agent_can_continue_from_list_files_to_read_file() -> None:
     model = ScriptedToolModel()
     tool_invocations: list[tuple[str, dict[str, Any]]] = []
 
-    async def list_files(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def list_files(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         tool_invocations.append(("list", input_data))
         return {
             "route": "workspace_list_files",
-            "tool_calls": [{"tool_name": "workspace.list_files", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.list_files",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md",
             "citations": [],
         }
 
-    async def read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         tool_invocations.append(("read", input_data))
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md:1-1\n1: # Project",
-            "citations": [{"type": "workspace_file", "id": "README.md", "title": "README.md"}],
+            "citations": [
+                {
+                    "type": "workspace_file",
+                    "id": "README.md",
+                    "title": "README.md",
+                }
+            ],
         }
 
     agent = ChatAgent(model=model)  # type: ignore[arg-type]
@@ -431,16 +577,30 @@ async def test_chat_agent_can_continue_from_list_files_to_read_file() -> None:
         event
         async for event in agent.run_stream(
             {"message": "Find the overview files, then read README.md."},
-            {"tools": {"workspace.list_files": list_files, "workspace.read_file": read_file}},
+            {
+                "tools": {
+                    "workspace.list_files": list_files,
+                    "workspace.read_file": read_file,
+                }
+            },
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
     assert model.calls == 3
     assert [name for name, _input_data in tool_invocations] == ["list", "read"]
     assert final["route"] == "workspace_read_file"
-    assert [call["tool_name"] for call in final["tool_calls"]] == ["workspace.list_files", "workspace.read_file"]
-    assert [event["type"] for event in final["agent_events"] if event["type"] in {"tool_use", "tool_result"}] == [
+    assert [call["tool_name"] for call in final["tool_calls"]] == [
+        "workspace.list_files",
+        "workspace.read_file",
+    ]
+    assert [
+        event["type"]
+        for event in final["agent_events"]
+        if event["type"] in {"tool_use", "tool_result"}
+    ] == [
         "tool_use",
         "tool_result",
         "tool_use",
@@ -453,14 +613,28 @@ async def test_chat_agent_streams_tool_use_before_tool_finishes() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         started.set()
         await release.wait()
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md:1-1\n1: # Project",
-            "citations": [{"type": "workspace_file", "id": "README.md", "title": "README.md"}],
+            "citations": [
+                {
+                    "type": "workspace_file",
+                    "id": "README.md",
+                    "title": "README.md",
+                }
+            ],
         }
 
     agent = ChatAgent(model=SingleToolModel())  # type: ignore[arg-type]
@@ -485,25 +659,47 @@ async def test_chat_agent_streams_tool_use_before_tool_finishes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_project_overview_prefetches_readme_without_waiting_for_model_tool_choice() -> None:
+async def test_overview_prefetches_readme_before_model() -> None:
     tool_invocations: list[tuple[str, dict[str, Any]]] = []
 
-    async def list_files(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def list_files(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         tool_invocations.append(("list", input_data))
         return {
             "route": "workspace_list_files",
-            "tool_calls": [{"tool_name": "workspace.list_files", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.list_files",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md\nREADME.zh-CN.md\npackage.json",
             "citations": [],
         }
 
-    async def read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         tool_invocations.append(("read", input_data))
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": f"{input_data['path']}:1-1\n1: # Clowder AI",
-            "citations": [{"type": "workspace_file", "id": input_data["path"], "title": input_data["path"]}],
+            "citations": [
+                {
+                    "type": "workspace_file",
+                    "id": input_data["path"],
+                    "title": input_data["path"],
+                }
+            ],
         }
 
     agent = ChatAgent(model=SummaryModel())  # type: ignore[arg-type]
@@ -511,24 +707,56 @@ async def test_project_overview_prefetches_readme_without_waiting_for_model_tool
         event
         async for event in agent.run_stream(
             {"message": "What is this project?"},
-            {"tools": {"workspace.list_files": list_files, "workspace.read_file": read_file}},
+            {
+                "tools": {
+                    "workspace.list_files": list_files,
+                    "workspace.read_file": read_file,
+                }
+            },
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
-    assert [name for name, _input_data in tool_invocations] == ["list", "read", "read", "read"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
+    assert [name for name, _input_data in tool_invocations] == [
+        "list",
+        "read",
+        "read",
+        "read",
+    ]
     assert final["route"] == "workspace_read_file"
     assert "coordinates AI agents" in final["answer"]
-    assert len([event for event in final["agent_events"] if event["type"] == "tool_use"]) == 4
-    assert len([event for event in final["agent_events"] if event["type"] == "tool_result"]) == 4
+    assert (
+        len(
+            [
+                event
+                for event in final["agent_events"]
+                if event["type"] == "tool_use"
+            ]
+        )
+        == 4
+    )
+    assert (
+        len(
+            [
+                event
+                for event in final["agent_events"]
+                if event["type"] == "tool_result"
+            ]
+        )
+        == 4
+    )
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_combines_prefetched_evidence_with_rewritten_rag_searches() -> None:
+async def test_prefetch_combines_with_rewritten_rag_search() -> None:
     model = RewrittenRagModel()
     queries: list[str] = []
 
-    async def search_rag(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def search_rag(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         query = str(input_data.get("query") or "")
         queries.append(query)
         return {
@@ -541,28 +769,51 @@ async def test_chat_agent_combines_prefetched_evidence_with_rewritten_rag_search
                 }
             ],
             "answer": f"Evidence for {query}",
-            "citations": [{"type": "project_doc", "id": query, "title": query}],
+            "citations": [
+                {"type": "project_doc", "id": query, "title": query}
+            ],
         }
 
     events = [
         event
         async for event in ChatAgent(model=model).run_stream(  # type: ignore[arg-type]
-            {"message": "Why does token refresh fail, and what retry policy did we choose?"},
+            {
+                ("message"): (
+                    "Why does token refresh fail, and what retry policy "
+                    "did we choose?"
+                )
+            },
             {
                 "tools": {"rag.search_similar_documents": search_rag},
                 "evidence": [{"title": "prefetched auth overview"}],
-                "server_context": "[Related Evidence]\nauth overview\n[/Related Evidence]",
+                ("server_context"): (
+                    "[Related Evidence]\nauth overview\n[/Related Evidence]"
+                ),
             },
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
-    assert queries == ["token refresh timeout history", "idempotent retry decision"]
-    assert [call["arguments"]["query"] for call in final["tool_calls"]] == queries
-    strategy = next(event for event in final["agent_events"] if event["type"] == "rag_strategy")
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
+    assert queries == [
+        "token refresh timeout history",
+        "idempotent retry decision",
+    ]
+    assert [
+        call["arguments"]["query"] for call in final["tool_calls"]
+    ] == queries
+    strategy = next(
+        event
+        for event in final["agent_events"]
+        if event["type"] == "rag_strategy"
+    )
     assert strategy["mode"] == "hybrid_rag"
     assert strategy["pre_retrieval"]["evidence_count"] == 1
-    assert strategy["pre_retrieval"]["query"] == "Why does token refresh fail, and what retry policy did we choose?"
+    assert (
+        strategy["pre_retrieval"]["query"]
+        == "Why does token refresh fail, and what retry policy did we choose?"
+    )
     assert strategy["pre_retrieval"]["sources"] == [
         {
             "source_id": "",
@@ -576,18 +827,28 @@ async def test_chat_agent_combines_prefetched_evidence_with_rewritten_rag_search
 
 
 @pytest.mark.asyncio
-async def test_chat_agent_evaluation_mode_preserves_prefetch_and_tool_retrieval_contexts() -> None:
+async def test_eval_preserves_prefetch_and_tool_contexts() -> None:
     model = RewrittenRagModel()
 
-    async def search_rag(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def search_rag(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         query = str(input_data.get("query") or "")
         source_id = f"source-{len(query)}"
         snippet = f"Evidence returned for {query}."
         return {
             "route": "semantic_search",
-            "tool_calls": [{"tool_name": "rag.search_similar_documents", "arguments": {"query": query}, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "rag.search_similar_documents",
+                    "arguments": {"query": query},
+                    "status": "success",
+                }
+            ],
             "answer": snippet,
-            "citations": [{"type": "project_doc", "id": source_id, "title": query}],
+            "citations": [
+                {"type": "project_doc", "id": source_id, "title": query}
+            ],
             "retrieved_contexts": [snippet],
             "retrieval_results": [
                 {
@@ -620,11 +881,15 @@ async def test_chat_agent_evaluation_mode_preserves_prefetch_and_tool_retrieval_
 
     trace = final["evaluation_trace"]
     assert trace["target"] == "ChatAgent"
-    assert [item["stage"] for item in trace["retrievals"]] == ["prefetch", "agent_tool", "agent_tool"]
+    assert [item["stage"] for item in trace["retrievals"]] == [
+        "prefetch",
+        "agent_tool",
+        "agent_tool",
+    ]
     assert (
-        "[project_doc] Authentication policy: Authentication retries must be idempotent."
-        in trace["retrieved_contexts"]
-    )
+        "[project_doc] Authentication policy: Authentication retries must "
+        "be idempotent."
+    ) in trace["retrieved_contexts"]
     assert any(
         item.endswith("Evidence returned for token refresh timeout history.")
         for item in trace["retrieved_contexts"]
@@ -639,22 +904,43 @@ async def test_chat_agent_evaluation_mode_preserves_prefetch_and_tool_retrieval_
 
 
 @pytest.mark.asyncio
-async def test_project_overview_without_llm_uses_workspace_evidence(monkeypatch) -> None:
+async def test_project_overview_without_llm_uses_workspace_evidence(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "llm_api_key", None)
 
-    async def list_files(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def list_files(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         return {
             "route": "workspace_list_files",
-            "tool_calls": [{"tool_name": "workspace.list_files", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.list_files",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md frontend/package.json",
             "citations": [],
         }
 
-    async def read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
-            "answer": "README.md:1-2\n1: # RepoLens AI\n2: Core capability: repository analysis.",
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
+            ("answer"): (
+                "README.md:1-2\n1: # RepoLens AI\n2: Core capability: "
+                "repository analysis."
+            ),
             "citations": [],
         }
 
@@ -662,11 +948,18 @@ async def test_project_overview_without_llm_uses_workspace_evidence(monkeypatch)
         event
         async for event in ChatAgent(model=None).run_stream(
             {"message": "What does this project do?"},
-            {"tools": {"workspace.list_files": list_files, "workspace.read_file": read_file}},
+            {
+                "tools": {
+                    "workspace.list_files": list_files,
+                    "workspace.read_file": read_file,
+                }
+            },
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
     assert "Core capability: repository analysis" in final["answer"]
     assert final["completion"]["tool_call_count"] == 2
     assert final["completion"]["tool_error_count"] == 0
@@ -675,16 +968,26 @@ async def test_project_overview_without_llm_uses_workspace_evidence(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_open_issue_question_without_llm_uses_prefetched_issue_evidence(monkeypatch) -> None:
+async def test_open_issue_question_without_llm_uses_prefetched_issue_evidence(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "llm_api_key", None)
 
-    async def unexpected_workspace_call(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        raise AssertionError("Issue query must not be routed to workspace tools")
+    async def unexpected_workspace_call(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+        raise AssertionError(
+            "Issue query must not be routed to workspace tools"
+        )
 
     events = [
         event
         async for event in ChatAgent(model=None).run_stream(
-            {"message": "请列出当前仓库未关闭的 Issue，并说明你使用了哪些数据。"},
+            {
+                ("message"): (
+                    "请列出当前仓库未关闭的 Issue，并说明你使用了哪些数据。"
+                )
+            },
             {
                 "tools": {"workspace.list_files": unexpected_workspace_call},
                 "evidence": [
@@ -692,7 +995,10 @@ async def test_open_issue_question_without_llm_uses_prefetched_issue_evidence(mo
                         "source_type": "issue",
                         "source_id": "issue-18",
                         "title": "Issue #18: Token refresh race",
-                        "snippet": "Token refresh can race under concurrent requests. state: open",
+                        ("snippet"): (
+                            "Token refresh can race under concurrent "
+                            "requests. state: open"
+                        ),
                         "metadata": {"number": 18, "state": "open"},
                     },
                     {
@@ -707,7 +1013,9 @@ async def test_open_issue_question_without_llm_uses_prefetched_issue_evidence(mo
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
     assert "Issue #18: Token refresh race" in final["answer"]
     assert "Issue #11: Retired task" not in final["answer"]
     assert "本轮没有调用工作区源码工具" in final["answer"]
@@ -718,7 +1026,9 @@ async def test_open_issue_question_without_llm_uses_prefetched_issue_evidence(mo
 
 
 @pytest.mark.asyncio
-async def test_conversation_rag_tool_prefers_agent_rewritten_query(monkeypatch) -> None:
+async def test_conversation_rag_tool_prefers_agent_rewritten_query(
+    monkeypatch,
+) -> None:
     repo = SimpleNamespace(id=uuid.uuid4(), full_name="acme/auth-service")
     conversation = SimpleNamespace(id=uuid.uuid4())
     captured: dict[str, Any] = {}
@@ -728,15 +1038,25 @@ async def test_conversation_rag_tool_prefers_agent_rewritten_query(monkeypatch) 
         return (
             "rewritten evidence",
             [{"type": "project_doc", "id": "doc-1", "title": "Retry policy"}],
-            [{"source_type": "project_doc", "source_id": "doc-1", "title": "Retry policy"}],
+            [
+                {
+                    "source_type": "project_doc",
+                    "source_id": "doc-1",
+                    "title": "Retry policy",
+                }
+            ],
         )
 
     def fake_record_recall_event(*args, **kwargs):
         captured["recall_query"] = kwargs["query"]
         captured["metadata"] = kwargs["metadata"]
 
-    monkeypatch.setattr("app.api.routes.chat._semantic_search", fake_semantic_search)
-    monkeypatch.setattr("app.api.routes.chat.record_recall_event", fake_record_recall_event)
+    monkeypatch.setattr(
+        "app.api.routes.chat._semantic_search", fake_semantic_search
+    )
+    monkeypatch.setattr(
+        "app.api.routes.chat.record_recall_event", fake_record_recall_event
+    )
     tools = _build_conversation_tools(repo, conversation, object())
 
     result = await tools["rag.search_similar_documents"](
@@ -747,13 +1067,22 @@ async def test_conversation_rag_tool_prefers_agent_rewritten_query(monkeypatch) 
         {},
     )
 
-    assert captured["search_query"] == "refresh token idempotency race condition"
-    assert captured["recall_query"] == "refresh token idempotency race condition"
+    assert (
+        captured["search_query"] == "refresh token idempotency race condition"
+    )
+    assert (
+        captured["recall_query"] == "refresh token idempotency race condition"
+    )
     assert captured["metadata"]["query_rewritten"] is True
-    assert result["tool_calls"][0]["arguments"]["query"] == "refresh token idempotency race condition"
+    assert (
+        result["tool_calls"][0]["arguments"]["query"]
+        == "refresh token idempotency race condition"
+    )
 
 
-def test_repo_checkout_path_reuses_existing_same_full_name_checkout(tmp_path, monkeypatch) -> None:
+def test_repo_checkout_path_reuses_existing_same_full_name_checkout(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr(settings, "repo_checkout_dir", str(tmp_path))
     stale_checkout = tmp_path / "old-id-296569015__clowder-ai"
     stale_checkout.mkdir()
@@ -767,7 +1096,12 @@ def test_assignment_prompt_treats_empty_team_as_no_candidates() -> None:
     prompt = agent._tool_calling_user_prompt(
         {
             "message": "这个桌面化 Issue 应该分给谁？",
-            "context": {"team_members": [], "server_context": "README mentions 布偶猫 / opus as project personas."},
+            "context": {
+                "team_members": [],
+                ("server_context"): (
+                    "README mentions 布偶猫 / opus as project personas."
+                ),
+            },
             "observations": [],
             "agent_events": [],
             "tools": {},
@@ -780,14 +1114,21 @@ def test_assignment_prompt_treats_empty_team_as_no_candidates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_final_prompt_keeps_assignment_candidates_scoped_to_team_members() -> None:
+async def test_final_prompt_scopes_candidates_to_team() -> None:
     model = CapturingModel()
     agent = ChatAgent(model=model)  # type: ignore[arg-type]
     await agent._final_from_observations(
         {
             "message": "这个桌面化 Issue 应该分给谁？",
-            "context": {"team_members": [], "server_context": "README mentions 布偶猫 / opus as project personas."},
-            "observations": [{"answer": "Issue text mentions 布偶猫 and desktop work."}],
+            "context": {
+                "team_members": [],
+                ("server_context"): (
+                    "README mentions 布偶猫 / opus as project personas."
+                ),
+            },
+            "observations": [
+                {"answer": "Issue text mentions 布偶猫 and desktop work."}
+            ],
             "agent_events": [],
         }
     )
@@ -802,14 +1143,22 @@ async def test_final_prompt_keeps_assignment_candidates_scoped_to_team_members()
 async def test_chat_agent_retries_transient_tool_error_once() -> None:
     attempts = 0
 
-    async def flaky_read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def flaky_read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise TimeoutError("temporary timeout")
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md:1-1\n1: # Project",
             "citations": [],
         }
@@ -823,10 +1172,15 @@ async def test_chat_agent_retries_transient_tool_error_once() -> None:
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
     assert attempts == 2
     assert final["tool_calls"][0]["status"] == "success"
-    assert any(event["type"] == "tool_retry" and event["error_kind"] == "timeout" for event in final["agent_events"])
+    assert any(
+        event["type"] == "tool_retry" and event["error_kind"] == "timeout"
+        for event in final["agent_events"]
+    )
     assert final["completion"]["status"] == "completed"
 
 
@@ -834,12 +1188,20 @@ async def test_chat_agent_retries_transient_tool_error_once() -> None:
 async def test_chat_agent_stops_repeated_identical_tool_calls() -> None:
     invocations = 0
 
-    async def read_file(input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_file(
+        input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         nonlocal invocations
         invocations += 1
         return {
             "route": "workspace_read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": input_data, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": input_data,
+                    "status": "success",
+                }
+            ],
             "answer": "README.md:1-1\n1: # Project",
             "citations": [],
         }
@@ -853,8 +1215,14 @@ async def test_chat_agent_stops_repeated_identical_tool_calls() -> None:
         )
     ]
 
-    final = [event for event in events if event["event"] == "final"][-1]["data"]
+    final = [event for event in events if event["event"] == "final"][-1][
+        "data"
+    ]
     assert invocations == agent.max_repeated_tool_calls
     assert final["route"] == "tool_loop_guard"
     assert final["completion"]["reason"] == "repeated_tool_call"
-    assert any(event["type"] == "agent_loop_stop" and event["reason"] == "repeated_tool_call" for event in final["agent_events"])
+    assert any(
+        event["type"] == "agent_loop_stop"
+        and event["reason"] == "repeated_tool_call"
+        for event in final["agent_events"]
+    )

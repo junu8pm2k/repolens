@@ -6,9 +6,21 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import decrypt_token
-from app.db.models import ActionDraft, AuditLog, Issue, PullRequest, Repository, User
+from app.db.models import (
+    ActionDraft,
+    AuditLog,
+    Issue,
+    PullRequest,
+    Repository,
+    User,
+)
 from app.db.session import get_db
-from app.schemas.action_drafts import ActionDraftConfirmResponse, ActionDraftCreateRequest, ActionDraftResponse, AuditLogResponse
+from app.schemas.action_drafts import (
+    ActionDraftConfirmResponse,
+    ActionDraftCreateRequest,
+    ActionDraftResponse,
+    AuditLogResponse,
+)
 from app.services.github.client import GitHubClient
 from app.services.permissions import require_permission, write_audit_log
 
@@ -17,7 +29,11 @@ router = APIRouter()
 
 def _target_number(db: Session, draft: ActionDraft) -> int | None:
     meta = draft.meta or {}
-    raw = meta.get("target_number") or meta.get("issue_number") or meta.get("pr_number")
+    raw = (
+        meta.get("target_number")
+        or meta.get("issue_number")
+        or meta.get("pr_number")
+    )
     if raw is not None:
         try:
             return int(raw)
@@ -32,18 +48,34 @@ def _target_number(db: Session, draft: ActionDraft) -> int | None:
     return None
 
 
-async def _execute_github_draft(db: Session, draft: ActionDraft, repo: Repository) -> dict:
-    token = decrypt_token(repo.github_token_encrypted, settings.token_encryption_key) if repo.github_token_encrypted else None
+async def _execute_github_draft(
+    db: Session, draft: ActionDraft, repo: Repository
+) -> dict:
+    token = (
+        decrypt_token(
+            repo.github_token_encrypted, settings.token_encryption_key
+        )
+        if repo.github_token_encrypted
+        else None
+    )
     client = GitHubClient(token=token, base_url=repo.api_base_url)
     draft_type = draft.draft_type.lower()
     issue_number = _target_number(db, draft)
     if draft_type in {"issue_comment", "pr_comment", "comment"}:
         if issue_number is None:
             raise RuntimeError("评论草稿缺少 issue/pr number")
-        return await client.create_issue_comment(repo.owner, repo.name, issue_number, draft.content)
+        return await client.create_issue_comment(
+            repo.owner, repo.name, issue_number, draft.content
+        )
     if draft_type == "create_issue":
-        title = draft.title or (draft.content.splitlines()[0][:120] if draft.content else "RepoLens AI Issue")
-        return await client.create_issue(repo.owner, repo.name, title, draft.content)
+        title = draft.title or (
+            draft.content.splitlines()[0][:120]
+            if draft.content
+            else "RepoLens AI Issue"
+        )
+        return await client.create_issue(
+            repo.owner, repo.name, title, draft.content
+        )
     if draft_type == "close_issue":
         if issue_number is None:
             raise RuntimeError("关闭 Issue 草稿缺少 issue number")
@@ -56,9 +88,16 @@ async def _execute_github_draft(db: Session, draft: ActionDraft, repo: Repositor
             labels = [draft.title] if draft.title else []
         if not labels:
             raise RuntimeError("Label 草稿缺少 labels")
-        return await client.add_issue_labels(repo.owner, repo.name, issue_number, [str(item) for item in labels])
+        return await client.add_issue_labels(
+            repo.owner, repo.name, issue_number, [str(item) for item in labels]
+        )
     if draft_type == "send_report":
-        return {"status": "recorded", "message": "报告草稿已在 RepoLens AI 中标记为已发送，未接入外部消息渠道。"}
+        return {
+            "status": "recorded",
+            ("message"): (
+                "报告草稿已在 RepoLens AI 中标记为已发送，未接入外部消息渠道。"
+            ),
+        }
     raise RuntimeError(f"暂不支持执行草稿类型：{draft.draft_type}")
 
 
@@ -148,7 +187,14 @@ async def cancel_action_draft(
     if draft.status != "pending_confirmation":
         raise HTTPException(status_code=400, detail="只有待确认草稿可以取消")
     draft.status = "cancelled"
-    write_audit_log(db, user=user, repo_id=draft.repo_id, action="action_draft.cancel", target_type=draft.target_type, target_id=str(draft.id))
+    write_audit_log(
+        db,
+        user=user,
+        repo_id=draft.repo_id,
+        action="action_draft.cancel",
+        target_type=draft.target_type,
+        target_id=str(draft.id),
+    )
     db.commit()
     db.refresh(draft)
     return draft
@@ -182,8 +228,13 @@ async def confirm_action_draft(
             target_type=draft.target_type,
             target_id=str(draft.target_id or draft.id),
             status="success",
-            request_json={"draft_id": str(draft.id), "draft_type": draft.draft_type},
-            result_json=result if isinstance(result, dict) else {"result": result},
+            request_json={
+                "draft_id": str(draft.id),
+                "draft_type": draft.draft_type,
+            },
+            result_json=result
+            if isinstance(result, dict)
+            else {"result": result},
         )
     except Exception as exc:
         draft.status = "failed"
@@ -198,7 +249,10 @@ async def confirm_action_draft(
             target_type=draft.target_type,
             target_id=str(draft.target_id or draft.id),
             status="failed",
-            request_json={"draft_id": str(draft.id), "draft_type": draft.draft_type},
+            request_json={
+                "draft_id": str(draft.id),
+                "draft_type": draft.draft_type,
+            },
             result_json={"error": str(exc)},
         )
     db.commit()

@@ -23,7 +23,9 @@ def test_rerank_prefers_exact_path_and_query_terms() -> None:
         },
     ]
 
-    results = rerank_documents("login token auth middleware", candidates, limit=2)
+    results = rerank_documents(
+        "login token auth middleware", candidates, limit=2
+    )
 
     assert results[0]["id"] == "auth"
     assert results[0]["rerank_score"] >= results[1]["rerank_score"]

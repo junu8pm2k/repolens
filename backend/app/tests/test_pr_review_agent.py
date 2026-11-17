@@ -42,7 +42,9 @@ async def test_pr_review_fallback_emits_blocking_findings() -> None:
                     "patch": "permission change",
                 }
             ],
-            "comments": [{"body": "Please verify token handling is not logged."}],
+            "comments": [
+                {"body": "Please verify token handling is not logged."}
+            ],
         },
         {"ci_summary": {"failed_runs": 1}},
     )
@@ -54,7 +56,7 @@ async def test_pr_review_fallback_emits_blocking_findings() -> None:
 
 
 @pytest.mark.asyncio
-async def test_pr_review_downgrades_merge_when_llm_returns_blocking_finding() -> None:
+async def test_blocking_finding_downgrades_merge() -> None:
     result = await PRReviewAgent(llm=OverconfidentLLM()).run(
         {
             "number": 13,
@@ -76,5 +78,7 @@ async def test_pr_review_downgrades_merge_when_llm_returns_blocking_finding() ->
     )
 
     assert result["merge_recommendation"] == "修改后合入"
-    assert any("权限边界缺少验证" in item for item in result["blocking_issues"])
+    assert any(
+        "权限边界缺少验证" in item for item in result["blocking_issues"]
+    )
     assert result["review_findings"][0]["severity"] == "P2"

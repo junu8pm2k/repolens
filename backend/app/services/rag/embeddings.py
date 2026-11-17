@@ -23,7 +23,10 @@ def _deterministic_tokens(text: str) -> list[str]:
     tokens = re.findall(r"[a-z0-9_\-]+", lowered)
     for segment in re.findall(r"[\u4e00-\u9fff]+", lowered):
         tokens.extend(segment)
-        tokens.extend(segment[index : index + 2] for index in range(max(0, len(segment) - 1)))
+        tokens.extend(
+            segment[index : index + 2]
+            for index in range(max(0, len(segment) - 1))
+        )
     return tokens
 
 
@@ -38,11 +41,16 @@ def deterministic_embedding(text: str, dimensions: int = 128) -> list[float]:
     return [value / norm for value in vector]
 
 
-def _validate_vector_dimensions(vector: list[float], dimensions: int, provider: str) -> list[float]:
+def _validate_vector_dimensions(
+    vector: list[float], dimensions: int, provider: str
+) -> list[float]:
     if len(vector) != dimensions:
         raise ValueError(
-            f"Embedding provider '{provider}' returned {len(vector)} dimensions; expected {dimensions}. "
-            "Refusing to truncate or pad vectors."
+            (
+                f"Embedding provider '{provider}' returned {len(vector)} "
+                f"dimensions; expected {dimensions}. Refusing to truncate or "
+                f"pad vectors."
+            )
         )
     return vector
 
@@ -65,23 +73,35 @@ def normalize_embedding_provider(provider: str) -> str:
     }
     resolved = aliases.get(provider)
     if resolved is None:
-        raise ValueError(f"Unsupported embedding provider: {provider or '<empty>'}")
+        raise ValueError(
+            f"Unsupported embedding provider: {provider or '<empty>'}"
+        )
     return resolved
 
 
-def validate_embedding_contract(provider: str, model: str, dimensions: int) -> None:
+def validate_embedding_contract(
+    provider: str, model: str, dimensions: int
+) -> None:
     configured = (
         normalize_embedding_provider(settings.embedding_provider),
         settings.embedding_model.strip(),
         settings.embedding_dimensions,
     )
-    requested = (normalize_embedding_provider(provider), model.strip(), dimensions)
+    requested = (
+        normalize_embedding_provider(provider),
+        model.strip(),
+        dimensions,
+    )
     if requested != configured:
         raise ValueError(
-            "Embedding contract mismatch: "
-            f"requested provider={requested[0]}, model={requested[1]}, dimensions={requested[2]}; "
-            f"configured provider={configured[0]}, model={configured[1]}, dimensions={configured[2]}. "
-            "All repositories sharing the Milvus collection must use one vector space."
+            (
+                f"Embedding contract mismatch: requested provider="
+                f"{requested[0]}, model={requested[1]}, dimensions="
+                f"{requested[2]}; configured provider={configured[0]}, model="
+                f"{configured[1]}, dimensions={configured[2]}. All "
+                f"repositories sharing the Milvus collection must use one "
+                f"vector space."
+            )
         )
 
 
@@ -97,7 +117,9 @@ def embedding_provider_name() -> str:
     return normalize_embedding_provider(settings.embedding_provider)
 
 
-def _embedding_payload(texts: list[str], dimensions: int, model: str) -> dict[str, Any]:
+def _embedding_payload(
+    texts: list[str], dimensions: int, model: str
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model,
         "input": texts,
@@ -115,8 +137,15 @@ def _embed_openai_compatible(
     api_key: str | None = None,
     base_url: str | None = None,
 ) -> list[list[float]]:
-    api_key = api_key or settings.embedding_api_key or os.getenv("OPENAI_API_KEY") or settings.llm_api_key
-    base_url = (base_url or settings.embedding_base_url or settings.llm_base_url).rstrip("/")
+    api_key = (
+        api_key
+        or settings.embedding_api_key
+        or os.getenv("OPENAI_API_KEY")
+        or settings.llm_api_key
+    )
+    base_url = (
+        base_url or settings.embedding_base_url or settings.llm_base_url
+    ).rstrip("/")
     model = model or settings.embedding_model
     if not api_key:
         raise RuntimeError("embedding API key is not configured")
@@ -128,12 +157,19 @@ def _embed_openai_compatible(
             json=_embedding_payload(texts, dimensions, model),
         )
         response.raise_for_status()
-        rows = sorted(response.json().get("data", []), key=lambda item: int(item.get("index", 0)))
+        rows = sorted(
+            response.json().get("data", []),
+            key=lambda item: int(item.get("index", 0)),
+        )
         vectors = [item.get("embedding") for item in rows]
         if len(vectors) != len(texts):
             raise ValueError("embedding response length mismatch")
         return [
-            _validate_vector_dimensions([float(value) for value in vector], dimensions, "openai_compatible")
+            _validate_vector_dimensions(
+                [float(value) for value in vector],
+                dimensions,
+                "openai_compatible",
+            )
             for vector in vectors
         ]
 
@@ -145,7 +181,10 @@ def _local_sentence_transformer(model_name: str, device: str | None) -> Any:
         from sentence_transformers.util import get_device_name
     except ImportError as exc:  # pragma: no cover - optional local dependency
         raise EmbeddingUnavailableError(
-            "本地 Embedding 依赖未安装，请安装 backend/requirements-local-embedding.txt。"
+            (
+                "本地 Embedding 依赖未安装，请安装 backend/"
+                "requirements-local-embedding.txt。"
+            )
         ) from exc
 
     cache_dir = Path(settings.local_embedding_cache_dir).expanduser()
@@ -155,7 +194,11 @@ def _local_sentence_transformer(model_name: str, device: str | None) -> Any:
         cache_dir.mkdir(parents=True, exist_ok=True)
         resolved_device = device or get_device_name()
         # Qwen weights default to bfloat16, which is very slow on AVX2 CPUs.
-        model_kwargs = {"dtype": "float32"} if resolved_device.split(":", 1)[0] == "cpu" else {}
+        model_kwargs = (
+            {"dtype": "float32"}
+            if resolved_device.split(":", 1)[0] == "cpu"
+            else {}
+        )
         return SentenceTransformer(
             model_name,
             device=resolved_device,
@@ -166,8 +209,11 @@ def _local_sentence_transformer(model_name: str, device: str | None) -> Any:
     except Exception as exc:
         logger.exception("Failed to load local embedding model %s", model_name)
         raise EmbeddingUnavailableError(
-            "本地 Embedding 模型加载失败。请确认模型已完整下载，并检查 "
-            "LOCAL_EMBEDDING_CACHE_DIR 的读写权限；离线运行时需提前准备完整模型缓存。"
+            (
+                "本地 Embedding 模型加载失败。请确认模型已完整下载，并检查"
+                " LOCAL_EMBEDDING_CACHE_DIR 的读写权限；离线运行时需提前准"
+                "备完整模型缓存。"
+            )
         ) from exc
 
 
@@ -179,13 +225,17 @@ def _embed_local(
     is_query: bool = False,
 ) -> list[list[float]]:
     resolved_model = model_name or settings.local_embedding_model
-    model = _local_sentence_transformer(resolved_model, settings.local_embedding_device)
+    model = _local_sentence_transformer(
+        resolved_model, settings.local_embedding_device
+    )
     encode_kwargs: dict[str, Any] = {}
     if is_query and "qwen3-embedding" in resolved_model.lower():
         encode_kwargs["prompt_name"] = "query"
     vectors = model.encode(
         texts,
-        batch_size=4 if str(getattr(model, "device", "")).startswith("cpu") else 32,
+        batch_size=4
+        if str(getattr(model, "device", "")).startswith("cpu")
+        else 32,
         normalize_embeddings=True,
         convert_to_numpy=True,
         show_progress_bar=False,
@@ -194,11 +244,17 @@ def _embed_local(
     output: list[list[float]] = []
     for vector in vectors:
         values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
-        output.append(_validate_vector_dimensions([float(value) for value in values], dimensions, "local"))
+        output.append(
+            _validate_vector_dimensions(
+                [float(value) for value in values], dimensions, "local"
+            )
+        )
     return output
 
 
-def embed_texts(texts: list[str], dimensions: int | None = None) -> list[list[float]]:
+def embed_texts(
+    texts: list[str], dimensions: int | None = None
+) -> list[list[float]]:
     dimensions = dimensions or settings.embedding_dimensions
     return embed_knowledge_texts(
         texts,
@@ -226,7 +282,9 @@ def embed_knowledge_texts(
     validate_embedding_contract(provider, model, dimensions)
     resolved = normalize_embedding_provider(provider)
     if resolved in {"qwen_local", "local"}:
-        return _embed_local(clean_texts, dimensions, model_name=model, is_query=is_query)
+        return _embed_local(
+            clean_texts, dimensions, model_name=model, is_query=is_query
+        )
     if resolved == "dashscope":
         return _embed_openai_compatible(
             clean_texts,
@@ -238,11 +296,15 @@ def embed_knowledge_texts(
     if resolved == "openai_compatible":
         return _embed_openai_compatible(clean_texts, dimensions, model=model)
     if resolved == "deterministic":
-        return [deterministic_embedding(text, dimensions) for text in clean_texts]
+        return [
+            deterministic_embedding(text, dimensions) for text in clean_texts
+        ]
     raise ValueError(f"Unsupported embedding provider: {resolved}")
 
 
-def embed_knowledge_query(text: str, *, provider: str, model: str, dimensions: int) -> list[float]:
+def embed_knowledge_query(
+    text: str, *, provider: str, model: str, dimensions: int
+) -> list[float]:
     return embed_knowledge_texts(
         [text],
         provider=provider,

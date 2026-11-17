@@ -2,7 +2,13 @@ import re
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.models import Issue, KnowledgeBaseConfig, PullRequest, Repository, WorkflowRun
+from app.db.models import (
+    Issue,
+    KnowledgeBaseConfig,
+    PullRequest,
+    Repository,
+    WorkflowRun,
+)
 from app.services.rag.embeddings import embed_knowledge_texts
 from app.services.rag.vector_store import DocumentPayload, replace_documents
 
@@ -13,13 +19,20 @@ CI_LOG_MAX_CHUNKS = 6
 
 def sanitize_ci_log(text: str) -> str:
     sanitized = re.sub(
-        r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        (
+            "-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE "
+            "KEY-----"
+        ),
         "[REDACTED_PRIVATE_KEY]",
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    sanitized = re.sub(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "[REDACTED_GITHUB_TOKEN]", sanitized)
-    sanitized = re.sub(r"\bAKIA[A-Z0-9]{16}\b", "[REDACTED_AWS_ACCESS_KEY]", sanitized)
+    sanitized = re.sub(
+        r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", "[REDACTED_GITHUB_TOKEN]", sanitized
+    )
+    sanitized = re.sub(
+        r"\bAKIA[A-Z0-9]{16}\b", "[REDACTED_AWS_ACCESS_KEY]", sanitized
+    )
     sanitized = re.sub(
         r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
         "[REDACTED_JWT]",
@@ -30,11 +43,16 @@ def sanitize_ci_log(text: str) -> str:
         r"\1 [REDACTED]",
         sanitized,
     )
-    sanitized = re.sub(r"(?i)(::add-mask::)[^\r\n]+", r"\1[REDACTED]", sanitized)
+    sanitized = re.sub(
+        r"(?i)(::add-mask::)[^\r\n]+", r"\1[REDACTED]", sanitized
+    )
     return re.sub(
-        r"(?i)\b([a-z0-9_]*(?:api[_-]?key|access[_-]?key|access[_-]?token|auth[_-]?token|"
-        r"token|secret|password|passwd|private[_-]?key|client[_-]?secret|account[_-]?key)[a-z0-9_]*)"
-        r"(\s*[:=]\s*)([^\s,;]+)",
+        (
+            "(?i)\\b([a-z0-9_]*(?:api[_-]?key|access[_-]?key|access[_-]?token|"
+            "auth[_-]?token|token|secret|password|passwd|private[_-]?key|"
+            "client[_-]?secret|account[_-]?key)[a-z0-9_]*)(\\s*[:=]\\s*)([^\\s"
+            ",;]+)"
+        ),
         r"\1\2[REDACTED]",
         sanitized,
     )
@@ -56,7 +74,9 @@ def _iso(value) -> str | None:
     return value.isoformat() if value else None
 
 
-def _payload(source_type: str, source_id, title: str, content: str, metadata: dict) -> DocumentPayload | None:
+def _payload(
+    source_type: str, source_id, title: str, content: str, metadata: dict
+) -> DocumentPayload | None:
     if not content.strip():
         return None
     return DocumentPayload(
@@ -105,13 +125,19 @@ def index_repository_documents(
 
     prs = (
         db.query(PullRequest)
-        .options(selectinload(PullRequest.files), selectinload(PullRequest.review_comments))
+        .options(
+            selectinload(PullRequest.files),
+            selectinload(PullRequest.review_comments),
+        )
         .filter(PullRequest.repo_id == repo_id)
         .all()
     )
     for pr in prs:
         comments_text = "\n".join(
-            f"{comment.path or ''}:{comment.line or ''} {comment.author or ''}: {comment.body or ''}"
+            (
+                f"{comment.path or ''}:{comment.line or ''} "
+                f"{comment.author or ''}: {comment.body or ''}"
+            )
             for comment in pr.review_comments
         )
         content = "\n".join(
@@ -152,13 +178,19 @@ def index_repository_documents(
             item = _payload(
                 "workflow_run",
                 run.id,
-                run.name if len(log_chunks) == 1 else f"{run.name}#{chunk_index + 1}",
+                run.name
+                if len(log_chunks) == 1
+                else f"{run.name}#{chunk_index + 1}",
                 content,
                 {
                     "status": run.status,
                     "conclusion": run.conclusion,
                     "html_url": run.html_url,
-                    "jobs": [job.get("name") for job in (run.jobs or []) if isinstance(job, dict)],
+                    "jobs": [
+                        job.get("name")
+                        for job in (run.jobs or [])
+                        if isinstance(job, dict)
+                    ],
                     "created_at": _iso(run.created_at),
                     "updated_at": _iso(run.updated_at),
                     "chunk_index": chunk_index,
@@ -173,7 +205,9 @@ def index_repository_documents(
     vectors = None
     embedding_info = None
     config = (
-        db.query(KnowledgeBaseConfig).filter(KnowledgeBaseConfig.repo_id == repo_id).one_or_none()
+        db.query(KnowledgeBaseConfig)
+        .filter(KnowledgeBaseConfig.repo_id == repo_id)
+        .one_or_none()
         if generate_embeddings
         else None
     )

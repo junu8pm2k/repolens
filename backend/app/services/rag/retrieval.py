@@ -1,5 +1,5 @@
-import heapq
 import hashlib
+import heapq
 import math
 import re
 import uuid
@@ -12,9 +12,15 @@ from sqlalchemy.orm import Session
 from app.db.models import Document
 from app.services.context_compression import compress_retrieval_results
 from app.services.rag.rerank import rerank_documents
-from app.services.rag.source_policy import RAG_SOURCE_TYPES, is_searchable_source, normalize_source_types
-from app.services.rag.vector_store import MilvusUnavailableError, search_milvus_documents
-
+from app.services.rag.source_policy import (
+    RAG_SOURCE_TYPES,
+    is_searchable_source,
+    normalize_source_types,
+)
+from app.services.rag.vector_store import (
+    MilvusUnavailableError,
+    search_milvus_documents,
+)
 
 BM25_K1 = 1.5
 BM25_B = 0.75
@@ -28,20 +34,29 @@ NEAR_DUPLICATE_JACCARD = 0.9
 def cosine_similarity(a: list[float], b: list[float]) -> float:
     if not a or not b:
         return 0.0
-    return sum(x * y for x, y in zip(a, b)) / ((math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))) or 1.0)
+    return sum(x * y for x, y in zip(a, b)) / (
+        (math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b)))
+        or 1.0
+    )
 
 
 def _as_uuid(value: str | uuid.UUID) -> uuid.UUID:
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
 
 
-def _parse_datetime(value: str | None, end_of_day: bool = False) -> datetime | None:
+def _parse_datetime(
+    value: str | None, end_of_day: bool = False
+) -> datetime | None:
     if not value:
         return None
     try:
         if len(value) == 10:
             parsed_date = datetime.fromisoformat(value).date()
-            return datetime.combine(parsed_date, time.max if end_of_day else time.min, tzinfo=timezone.utc)
+            return datetime.combine(
+                parsed_date,
+                time.max if end_of_day else time.min,
+                tzinfo=timezone.utc,
+            )
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
     except ValueError:
@@ -68,16 +83,28 @@ def _matches_metadata(doc_meta: dict, filters: dict | None) -> bool:
     if state and doc_meta.get("state") != state:
         return False
 
-    path = (filters.get("path") or filters.get("path_prefix") or filters.get("module") or "").lower()
+    path = (
+        filters.get("path")
+        or filters.get("path_prefix")
+        or filters.get("module")
+        or ""
+    ).lower()
     if path:
         files = [str(item).lower() for item in doc_meta.get("files") or []]
         if files and not any(path in filename for filename in files):
             return False
-        if not files and path not in " ".join(str(value).lower() for value in doc_meta.values()):
+        if not files and path not in " ".join(
+            str(value).lower() for value in doc_meta.values()
+        ):
             return False
 
-    start_at = _parse_datetime(filters.get("start_date") or filters.get("updated_after"))
-    end_at = _parse_datetime(filters.get("end_date") or filters.get("updated_before"), end_of_day=True)
+    start_at = _parse_datetime(
+        filters.get("start_date") or filters.get("updated_after")
+    )
+    end_at = _parse_datetime(
+        filters.get("end_date") or filters.get("updated_before"),
+        end_of_day=True,
+    )
     doc_time = _metadata_time(doc_meta)
     if start_at and (doc_time is None or doc_time < start_at):
         return False
@@ -97,7 +124,11 @@ def _matches_metadata(doc_meta: dict, filters: dict | None) -> bool:
         } or value in (None, ""):
             continue
         if key == "branch":
-            current = doc_meta.get("branch") or doc_meta.get("base_branch") or doc_meta.get("head_branch")
+            current = (
+                doc_meta.get("branch")
+                or doc_meta.get("base_branch")
+                or doc_meta.get("head_branch")
+            )
             if current != value:
                 return False
             continue
@@ -115,13 +146,20 @@ def _tokens(text: str) -> list[str]:
     tokens = re.findall(r"[a-z0-9_\-]+", lowered)
     for segment in re.findall(r"[\u4e00-\u9fff]+", lowered):
         tokens.extend(segment)
-        tokens.extend(segment[index : index + 2] for index in range(max(0, len(segment) - 1)))
+        tokens.extend(
+            segment[index : index + 2]
+            for index in range(max(0, len(segment) - 1))
+        )
     return tokens
 
 
 def _clip(text: str, limit: int = 260) -> str:
     cleaned = " ".join((text or "").split())
-    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1].rstrip() + "…"
+    return (
+        cleaned
+        if len(cleaned) <= limit
+        else cleaned[: limit - 1].rstrip() + "…"
+    )
 
 
 def _normalise_scores(items: list[dict[str, Any]], field: str) -> None:
@@ -133,7 +171,9 @@ def _normalise_scores(items: list[dict[str, Any]], field: str) -> None:
         item[field] = round(value / max_value, 4)
 
 
-def _document_result(doc: Document, score: float, source: str, score_field: str) -> dict[str, Any]:
+def _document_result(
+    doc: Document, score: float, source: str, score_field: str
+) -> dict[str, Any]:
     metadata = doc.meta or {}
     result = {
         "id": str(doc.id),
@@ -145,7 +185,10 @@ def _document_result(doc: Document, score: float, source: str, score_field: str)
         "snippet": _clip(doc.content),
         "_raw_content": doc.content,
         score_field: round(max(0.0, score), 4),
-        "retrieval": {"sources": [source], score_field: round(max(0.0, score), 4)},
+        "retrieval": {
+            "sources": [source],
+            score_field: round(max(0.0, score), 4),
+        },
     }
     return result
 
@@ -194,23 +237,44 @@ def _milvus_vector_candidates(
     return candidates
 
 
-def _bm25_document_stats(doc: Document, query_terms: list[str]) -> dict[str, Any]:
+def _bm25_document_stats(
+    doc: Document, query_terms: list[str]
+) -> dict[str, Any]:
     metadata = doc.meta or {}
     field_tokens = {
         "title": _tokens(doc.title or ""),
         "path": _tokens(str(metadata.get("path") or "")),
-        "symbol": _tokens(str(metadata.get("symbol") or metadata.get("name") or "")),
-        "labels": _tokens(" ".join(str(item) for item in metadata.get("labels") or [])),
+        "symbol": _tokens(
+            str(metadata.get("symbol") or metadata.get("name") or "")
+        ),
+        "labels": _tokens(
+            " ".join(str(item) for item in metadata.get("labels") or [])
+        ),
         "content": _tokens(doc.content or ""),
     }
-    field_weights = {"title": 4.0, "path": 3.0, "symbol": 4.5, "labels": 2.5, "content": 1.0}
-    counters = {field: Counter(tokens) for field, tokens in field_tokens.items()}
+    field_weights = {
+        "title": 4.0,
+        "path": 3.0,
+        "symbol": 4.5,
+        "labels": 2.5,
+        "content": 1.0,
+    }
+    counters = {
+        field: Counter(tokens) for field, tokens in field_tokens.items()
+    }
     weighted_tf = {
-        term: sum(float(counters[field].get(term, 0)) * field_weights[field] for field in field_tokens)
+        term: sum(
+            float(counters[field].get(term, 0)) * field_weights[field]
+            for field in field_tokens
+        )
         for term in query_terms
     }
-    matched_terms = [term for term in query_terms if weighted_tf.get(term, 0.0) > 0.0]
-    document_length = max(1, sum(len(tokens) for tokens in field_tokens.values()))
+    matched_terms = [
+        term for term in query_terms if weighted_tf.get(term, 0.0) > 0.0
+    ]
+    document_length = max(
+        1, sum(len(tokens) for tokens in field_tokens.values())
+    )
     return {
         "doc": doc,
         "weighted_tf": weighted_tf,
@@ -228,13 +292,19 @@ def _bm25_score(
 ) -> float:
     score = 0.0
     document_length = float(stats["document_length"])
-    length_norm = BM25_K1 * (1.0 - BM25_B + BM25_B * document_length / max(average_document_length, 1.0))
+    length_norm = BM25_K1 * (
+        1.0
+        - BM25_B
+        + BM25_B * document_length / max(average_document_length, 1.0)
+    )
     for term, weighted_tf in stats["weighted_tf"].items():
         if weighted_tf <= 0:
             continue
         df = float(document_frequency.get(term, 0))
         idf = math.log1p((document_count - df + 0.5) / (df + 0.5))
-        score += idf * (weighted_tf * (BM25_K1 + 1.0)) / (weighted_tf + length_norm)
+        score += (
+            idf * (weighted_tf * (BM25_K1 + 1.0)) / (weighted_tf + length_norm)
+        )
     return max(0.0, score)
 
 
@@ -302,7 +372,11 @@ def _keyword_candidates(
             heapq.heapreplace(top_candidates, entry)
     candidates = [
         entry[2]
-        for entry in sorted(top_candidates, key=lambda entry: (entry[0], entry[1]), reverse=True)
+        for entry in sorted(
+            top_candidates,
+            key=lambda entry: (entry[0], entry[1]),
+            reverse=True,
+        )
     ]
     _normalise_scores(candidates, "keyword_score")
     for rank, item in enumerate(candidates, start=1):
@@ -313,34 +387,78 @@ def _keyword_candidates(
     return candidates
 
 
-def _merge_candidates(vector_items: list[dict[str, Any]], keyword_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _merge_candidates(
+    vector_items: list[dict[str, Any]], keyword_items: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
-    for source_name, items in [("vector", vector_items), ("keyword", keyword_items)]:
+    for source_name, items in [
+        ("vector", vector_items),
+        ("keyword", keyword_items),
+    ]:
         for item in items:
             metadata = item.get("metadata") or {}
             key = str(
                 metadata.get("chunk_id")
                 or item.get("id")
-                or f"{item.get('source_type')}:{item.get('source_id')}:{item.get('title')}"
+                or (
+                    f"{item.get('source_type')}:{item.get('source_id')}:"
+                    f"{item.get('title')}"
+                )
             )
             current = merged.get(key)
             if current is None:
-                current = {**item, "retrieval": {**(item.get("retrieval") or {})}}
-                current["retrieval"]["sources"] = list(dict.fromkeys(current["retrieval"].get("sources") or [source_name]))
+                current = {
+                    **item,
+                    "retrieval": {**(item.get("retrieval") or {})},
+                }
+                current["retrieval"]["sources"] = list(
+                    dict.fromkeys(
+                        current["retrieval"].get("sources") or [source_name]
+                    )
+                )
                 merged[key] = current
             else:
-                current["vector_score"] = max(float(current.get("vector_score") or 0.0), float(item.get("vector_score") or 0.0))
-                current["keyword_score"] = max(float(current.get("keyword_score") or 0.0), float(item.get("keyword_score") or 0.0))
+                current["vector_score"] = max(
+                    float(current.get("vector_score") or 0.0),
+                    float(item.get("vector_score") or 0.0),
+                )
+                current["keyword_score"] = max(
+                    float(current.get("keyword_score") or 0.0),
+                    float(item.get("keyword_score") or 0.0),
+                )
                 current["vector_score_raw"] = max(
-                    float(current.get("vector_score_raw") or 0.0), float(item.get("vector_score_raw") or 0.0)
+                    float(current.get("vector_score_raw") or 0.0),
+                    float(item.get("vector_score_raw") or 0.0),
                 )
-                current["bm25_score"] = max(float(current.get("bm25_score") or 0.0), float(item.get("bm25_score") or 0.0))
-                current["snippet"] = max([str(current.get("snippet") or ""), str(item.get("snippet") or "")], key=len)
+                current["bm25_score"] = max(
+                    float(current.get("bm25_score") or 0.0),
+                    float(item.get("bm25_score") or 0.0),
+                )
+                current["snippet"] = max(
+                    [
+                        str(current.get("snippet") or ""),
+                        str(item.get("snippet") or ""),
+                    ],
+                    key=len,
+                )
                 current["_raw_content"] = max(
-                    [str(current.get("_raw_content") or ""), str(item.get("_raw_content") or "")], key=len
+                    [
+                        str(current.get("_raw_content") or ""),
+                        str(item.get("_raw_content") or ""),
+                    ],
+                    key=len,
                 )
-                current["retrieval"]["sources"] = list(dict.fromkeys([*(current["retrieval"].get("sources") or []), source_name]))
-                for trace_key, trace_value in (item.get("retrieval") or {}).items():
+                current["retrieval"]["sources"] = list(
+                    dict.fromkeys(
+                        [
+                            *(current["retrieval"].get("sources") or []),
+                            source_name,
+                        ]
+                    )
+                )
+                for trace_key, trace_value in (
+                    item.get("retrieval") or {}
+                ).items():
                     if trace_key == "sources":
                         continue
                     current["retrieval"][trace_key] = trace_value
@@ -348,8 +466,15 @@ def _merge_candidates(vector_items: list[dict[str, Any]], keyword_items: list[di
     for item in merged.values():
         vector_score = float(item.get("vector_score") or 0.0)
         keyword_score = float(item.get("keyword_score") or 0.0)
-        both_bonus = DUAL_RECALL_BONUS if vector_score and keyword_score else 0.0
-        combined = min(1.0, VECTOR_FUSION_WEIGHT * vector_score + KEYWORD_FUSION_WEIGHT * keyword_score + both_bonus)
+        both_bonus = (
+            DUAL_RECALL_BONUS if vector_score and keyword_score else 0.0
+        )
+        combined = min(
+            1.0,
+            VECTOR_FUSION_WEIGHT * vector_score
+            + KEYWORD_FUSION_WEIGHT * keyword_score
+            + both_bonus,
+        )
         item["combined_score"] = round(combined, 4)
         item["fusion_score"] = round(combined, 4)
         item["score"] = round(combined, 4)
@@ -367,7 +492,9 @@ def _merge_candidates(vector_items: list[dict[str, Any]], keyword_items: list[di
             }
         )
         output.append(item)
-    output.sort(key=lambda item: float(item.get("combined_score") or 0.0), reverse=True)
+    output.sort(
+        key=lambda item: float(item.get("combined_score") or 0.0), reverse=True
+    )
     for rank, item in enumerate(output, start=1):
         item["fusion_rank"] = rank
         item["retrieval"]["fusion_rank"] = rank
@@ -375,8 +502,14 @@ def _merge_candidates(vector_items: list[dict[str, Any]], keyword_items: list[di
 
 
 def _normalised_fingerprint(text: str) -> str:
-    normalised = re.sub(r"[^a-z0-9_\-\u4e00-\u9fff]+", "", str(text or "").lower())
-    return hashlib.sha256(normalised.encode("utf-8")).hexdigest() if normalised else ""
+    normalised = re.sub(
+        r"[^a-z0-9_\-\u4e00-\u9fff]+", "", str(text or "").lower()
+    )
+    return (
+        hashlib.sha256(normalised.encode("utf-8")).hexdigest()
+        if normalised
+        else ""
+    )
 
 
 def _candidate_term_set(item: dict[str, Any]) -> set[str]:
@@ -391,13 +524,14 @@ def _same_duplicate_scope(left: dict[str, Any], right: dict[str, Any]) -> bool:
     right_parent = str(right_meta.get("parent_id") or "")
     if left_parent and right_parent:
         return left_parent == right_parent
-    return (
-        str(left.get("source_type") or "") == str(right.get("source_type") or "")
-        and str(left.get("source_id") or "") == str(right.get("source_id") or "")
-    )
+    return str(left.get("source_type") or "") == str(
+        right.get("source_type") or ""
+    ) and str(left.get("source_id") or "") == str(right.get("source_id") or "")
 
 
-def _deduplicate_candidates(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _deduplicate_candidates(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     kept: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
     fingerprints: dict[str, dict[str, Any]] = {}
@@ -406,8 +540,12 @@ def _deduplicate_candidates(items: list[dict[str, Any]]) -> tuple[list[dict[str,
         item_id = str(item.get("id") or "")
         raw_text = str(item.get("_raw_content") or item.get("snippet") or "")
         fingerprint = _normalised_fingerprint(raw_text)
-        duplicate_of: dict[str, Any] | None = fingerprints.get(fingerprint) if fingerprint else None
-        if duplicate_of is not None and not _same_duplicate_scope(item, duplicate_of):
+        duplicate_of: dict[str, Any] | None = (
+            fingerprints.get(fingerprint) if fingerprint else None
+        )
+        if duplicate_of is not None and not _same_duplicate_scope(
+            item, duplicate_of
+        ):
             duplicate_of = None
         if duplicate_of is None:
             current_terms = _candidate_term_set(item)
@@ -415,11 +553,15 @@ def _deduplicate_candidates(items: list[dict[str, Any]]) -> tuple[list[dict[str,
                 if not _same_duplicate_scope(item, existing):
                     continue
                 existing_id = str(existing.get("id") or "")
-                existing_terms = term_sets.get(existing_id) or _candidate_term_set(existing)
+                existing_terms = term_sets.get(
+                    existing_id
+                ) or _candidate_term_set(existing)
                 if not current_terms or not existing_terms:
                     continue
                 union = current_terms | existing_terms
-                similarity = len(current_terms & existing_terms) / max(len(union), 1)
+                similarity = len(current_terms & existing_terms) / max(
+                    len(union), 1
+                )
                 if similarity >= NEAR_DUPLICATE_JACCARD:
                     duplicate_of = existing
                     break
@@ -427,7 +569,9 @@ def _deduplicate_candidates(items: list[dict[str, Any]]) -> tuple[list[dict[str,
         if duplicate_of is not None:
             duplicate_id = str(duplicate_of.get("id") or "")
             duplicate_trace = duplicate_of.setdefault("retrieval", {})
-            duplicate_trace.setdefault("duplicates_removed", []).append(item_id)
+            duplicate_trace.setdefault("duplicates_removed", []).append(
+                item_id
+            )
             removed.append({"id": item_id, "duplicate_of": duplicate_id})
             continue
         kept.append(item)
@@ -436,7 +580,9 @@ def _deduplicate_candidates(items: list[dict[str, Any]]) -> tuple[list[dict[str,
     return kept, removed
 
 
-def _limit_parent_occupancy(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _limit_parent_occupancy(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     counts: Counter[str] = Counter()
     kept: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
@@ -444,7 +590,9 @@ def _limit_parent_occupancy(items: list[dict[str, Any]]) -> tuple[list[dict[str,
         metadata = item.get("metadata") or {}
         parent_id = str(metadata.get("parent_id") or "")
         if parent_id and counts[parent_id] >= MAX_CHUNKS_PER_PARENT:
-            removed.append({"id": str(item.get("id") or ""), "parent_id": parent_id})
+            removed.append(
+                {"id": str(item.get("id") or ""), "parent_id": parent_id}
+            )
             continue
         kept.append(item)
         if parent_id:
@@ -453,10 +601,20 @@ def _limit_parent_occupancy(items: list[dict[str, Any]]) -> tuple[list[dict[str,
 
 
 def _same_version(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    for key in ("branch", "commit_sha", "version", "checksum", "knowledge_document_id"):
+    for key in (
+        "branch",
+        "commit_sha",
+        "version",
+        "checksum",
+        "knowledge_document_id",
+    ):
         left_value = left.get(key)
         right_value = right.get(key)
-        if left_value is not None and right_value is not None and left_value != right_value:
+        if (
+            left_value is not None
+            and right_value is not None
+            and left_value != right_value
+        ):
             return False
     return True
 
@@ -478,14 +636,25 @@ def expand_parent_context(
         source_id = item.get("source_id")
         source_type = str(item.get("source_type") or "")
         retrieval = dict(item.get("retrieval") or {})
-        if not parent_id or child_index is None or not source_id or not source_type:
-            retrieval["parent_expansion"] = {"expanded": False, "reason": "parent metadata unavailable"}
+        if (
+            not parent_id
+            or child_index is None
+            or not source_id
+            or not source_type
+        ):
+            retrieval["parent_expansion"] = {
+                "expanded": False,
+                "reason": "parent metadata unavailable",
+            }
             expanded.append({**item, "retrieval": retrieval})
             continue
         try:
             source_uuid = _as_uuid(source_id)
         except (TypeError, ValueError):
-            retrieval["parent_expansion"] = {"expanded": False, "reason": "invalid source id"}
+            retrieval["parent_expansion"] = {
+                "expanded": False,
+                "reason": "invalid source id",
+            }
             expanded.append({**item, "retrieval": retrieval})
             continue
         siblings = (
@@ -508,9 +677,14 @@ def expand_parent_context(
             sibling_index = int(sibling_meta.get("child_index") or 0)
             if abs(sibling_index - current_index) <= max(0, neighbor_window):
                 selected.append(sibling)
-        selected.sort(key=lambda row: int((row.meta or {}).get("child_index") or 0))
+        selected.sort(
+            key=lambda row: int((row.meta or {}).get("child_index") or 0)
+        )
         if not selected:
-            retrieval["parent_expansion"] = {"expanded": False, "reason": "no matching siblings"}
+            retrieval["parent_expansion"] = {
+                "expanded": False,
+                "reason": "no matching siblings",
+            }
             expanded.append({**item, "retrieval": retrieval})
             continue
         parts: list[str] = []
@@ -525,10 +699,16 @@ def expand_parent_context(
             parts.append(content)
             expanded_ids.append(str(sibling.id))
         if not parts:
-            retrieval["parent_expansion"] = {"expanded": False, "reason": "empty sibling content"}
+            retrieval["parent_expansion"] = {
+                "expanded": False,
+                "reason": "empty sibling content",
+            }
             expanded.append({**item, "retrieval": retrieval})
             continue
-        parent_expanded = len(expanded_ids) > 1 or str(item.get("id") or "") not in expanded_ids
+        parent_expanded = (
+            len(expanded_ids) > 1
+            or str(item.get("id") or "") not in expanded_ids
+        )
         retrieval["parent_expansion"] = {
             "expanded": parent_expanded,
             "parent_id": parent_id,
@@ -571,8 +751,14 @@ def search_similar_documents(
     source_types: list[str] | None = None,
     pipeline_trace: dict[str, Any] | None = None,
 ) -> list[dict]:
-    requested_types = normalize_source_types([source_type, *(source_types or [])]) or sorted(RAG_SOURCE_TYPES)
-    searchable_types = list(dict.fromkeys(item for item in requested_types if is_searchable_source(item)))
+    requested_types = normalize_source_types(
+        [source_type, *(source_types or [])]
+    ) or sorted(RAG_SOURCE_TYPES)
+    searchable_types = list(
+        dict.fromkeys(
+            item for item in requested_types if is_searchable_source(item)
+        )
+    )
     if not searchable_types:
         return []
 
@@ -606,7 +792,9 @@ def search_similar_documents(
             "backend": "milvus",
         }
     )
-    keyword_types = searchable_types if method in {"fulltext", "hybrid"} else []
+    keyword_types = (
+        searchable_types if method in {"fulltext", "hybrid"} else []
+    )
     if keyword_types:
         keyword_candidates = _keyword_candidates(
             db,
@@ -632,7 +820,9 @@ def search_similar_documents(
         merged = _merge_candidates(vector_candidates, keyword_candidates)
     stages.append(
         {
-            "name": "weighted_fusion" if method == "hybrid" else "single_retriever_selection",
+            "name": "weighted_fusion"
+            if method == "hybrid"
+            else "single_retriever_selection",
             "method": "weighted" if method == "hybrid" else method,
             "candidate_count": len(merged),
             "weights": {
@@ -653,14 +843,20 @@ def search_similar_documents(
             "parent_overflow_removed": parent_overflow_removed,
         }
     )
-    ranked = rerank_documents(query, aggregated, limit) if apply_rerank else aggregated[:limit]
+    ranked = (
+        rerank_documents(query, aggregated, limit)
+        if apply_rerank
+        else aggregated[:limit]
+    )
     if apply_rerank:
         stages.append(
             {
                 "name": "rerank",
                 "input_count": len(aggregated),
                 "output_count": len(ranked),
-                "mode": ranked[0].get("retrieval", {}).get("rerank_mode") if ranked else None,
+                "mode": ranked[0].get("retrieval", {}).get("rerank_mode")
+                if ranked
+                else None,
             }
         )
     if pipeline_trace is not None:
@@ -673,7 +869,9 @@ def search_similar_documents(
         )
     if not apply_compression:
         return ranked
-    compressed = compress_retrieval_results(query, ranked, max_tokens_per_item=260)
+    compressed = compress_retrieval_results(
+        query, ranked, max_tokens_per_item=260
+    )
     if pipeline_trace is not None:
         pipeline_trace["stages"].append(
             {

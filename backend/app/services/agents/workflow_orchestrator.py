@@ -7,19 +7,29 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.config import settings
-from app.schemas.workflow import WorkflowObservation, WorkflowReport, WorkflowSpec, WorkflowTask, WorkflowTaskResult
+from app.schemas.workflow import (
+    WorkflowObservation,
+    WorkflowReport,
+    WorkflowSpec,
+    WorkflowTask,
+    WorkflowTaskResult,
+)
 from app.services.agents.base import BaseAgent
 from app.services.agents.observer_agent import ObserverAgent
 from app.services.agents.planner_agent import PlannerAgent
 from app.services.agents.synthesis_agent import SynthesisAgent
 
-
-WorkflowTaskRunner = Callable[[WorkflowTask, WorkflowSpec, dict[str, Any]], Awaitable[WorkflowTaskResult | dict[str, Any]]]
+WorkflowTaskRunner = Callable[
+    [WorkflowTask, WorkflowSpec, dict[str, Any]],
+    Awaitable[WorkflowTaskResult | dict[str, Any]],
+]
 
 
 class WorkflowOrchestrator(BaseAgent):
     name = "workflow_orchestrator"
-    description = "协调 Planner、专用 Agent、Observer 和 Synthesis 完成工程决策。"
+    description = (
+        "协调 Planner、专用 Agent、Observer 和 Synthesis 完成工程决策。"
+    )
     available_tools = ["run_engineering_workflow"]
 
     def __init__(
@@ -34,7 +44,9 @@ class WorkflowOrchestrator(BaseAgent):
         self.observer = observer or ObserverAgent()
         self.synthesizer = synthesizer or SynthesisAgent()
 
-    async def run(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def run(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         spec_data = await self.planner.run(input_data, context)
         return await self.run_spec(spec_data, context)
 
@@ -46,7 +58,11 @@ class WorkflowOrchestrator(BaseAgent):
         allow_replan: bool = True,
     ) -> dict[str, Any]:
         started = time.perf_counter()
-        spec = spec_data if isinstance(spec_data, WorkflowSpec) else WorkflowSpec.model_validate(spec_data)
+        spec = (
+            spec_data
+            if isinstance(spec_data, WorkflowSpec)
+            else WorkflowSpec.model_validate(spec_data)
+        )
         current_spec = spec
         task_results: list[WorkflowTaskResult] = []
         observations: list[WorkflowObservation] = []
@@ -55,11 +71,21 @@ class WorkflowOrchestrator(BaseAgent):
         max_replans = self._max_replans(context, allow_replan)
 
         for attempt in range(max_replans + 1):
-            round_results = await self._run_task_graph(current_spec, context, previous_results=task_results)
+            round_results = await self._run_task_graph(
+                current_spec, context, previous_results=task_results
+            )
             task_results.extend(round_results)
-            observation = await self._observe(current_spec, task_results, context)
+            observation = await self._observe(
+                current_spec, task_results, context
+            )
             observations.append(observation)
-            round_records.append({"spec": current_spec, "results": round_results, "observation": observation})
+            round_records.append(
+                {
+                    "spec": current_spec,
+                    "results": round_results,
+                    "observation": observation,
+                }
+            )
 
             if attempt >= max_replans:
                 break
@@ -73,7 +99,9 @@ class WorkflowOrchestrator(BaseAgent):
             next_spec_data = await self.planner.replan(
                 {
                     "spec": current_spec.model_dump(mode="json"),
-                    "task_results": [item.model_dump(mode="json") for item in task_results],
+                    "task_results": [
+                        item.model_dump(mode="json") for item in task_results
+                    ],
                     "observation": observation.model_dump(mode="json"),
                     "reason": replan_reason,
                     "replan_iteration": attempt + 1,
@@ -99,17 +127,24 @@ class WorkflowOrchestrator(BaseAgent):
                     "added_tasks": [
                         task.id
                         for task in next_spec.tasks
-                        if task.id not in {existing.id for existing in current_spec.tasks}
+                        if task.id
+                        not in {existing.id for existing in current_spec.tasks}
                     ],
                 }
             )
             current_spec = next_spec
 
-        observation = observations[-1] if observations else WorkflowObservation(summary="Workflow did not run.")
+        observation = (
+            observations[-1]
+            if observations
+            else WorkflowObservation(summary="Workflow did not run.")
+        )
         synthesis = await self.synthesizer.run(
             {
                 "spec": current_spec.model_dump(mode="json"),
-                "task_results": [item.model_dump(mode="json") for item in task_results],
+                "task_results": [
+                    item.model_dump(mode="json") for item in task_results
+                ],
                 "observation": observation.model_dump(mode="json"),
             },
             context,
@@ -119,7 +154,9 @@ class WorkflowOrchestrator(BaseAgent):
             task_results=task_results,
             observation=observation,
             final_answer=str(synthesis.get("answer") or ""),
-            tool_calls=self._tool_calls(current_spec, task_results, replan_events),
+            tool_calls=self._tool_calls(
+                current_spec, task_results, replan_events
+            ),
             citations=self._citations(task_results),
             metrics={
                 "duration_ms": int((time.perf_counter() - started) * 1000),
@@ -127,9 +164,15 @@ class WorkflowOrchestrator(BaseAgent):
                 "plan_task_count": len(current_spec.tasks),
                 "execution_rounds": len(observations),
                 "replan_count": len(replan_events),
-                "success_count": len([item for item in task_results if item.status == "success"]),
-                "error_count": len([item for item in task_results if item.status == "error"]),
-                "skipped_count": len([item for item in task_results if item.status == "skipped"]),
+                "success_count": len(
+                    [item for item in task_results if item.status == "success"]
+                ),
+                "error_count": len(
+                    [item for item in task_results if item.status == "error"]
+                ),
+                "skipped_count": len(
+                    [item for item in task_results if item.status == "skipped"]
+                ),
                 "observer_findings": len(observation.findings),
             },
             agent_events=self._agent_events(round_records, replan_events),
@@ -145,7 +188,9 @@ class WorkflowOrchestrator(BaseAgent):
         observation_data = await self.observer.run(
             {
                 "spec": spec.model_dump(mode="json"),
-                "task_results": [item.model_dump(mode="json") for item in task_results],
+                "task_results": [
+                    item.model_dump(mode="json") for item in task_results
+                ],
             },
             context,
         )
@@ -176,7 +221,10 @@ class WorkflowOrchestrator(BaseAgent):
             blocked = [
                 task
                 for task in pending.values()
-                if any(dependency in blocked_dependencies for dependency in task.dependencies)
+                if any(
+                    dependency in blocked_dependencies
+                    for dependency in task.dependencies
+                )
             ]
             for task in blocked:
                 failed_dependencies = [
@@ -184,7 +232,9 @@ class WorkflowOrchestrator(BaseAgent):
                     for dependency in task.dependencies
                     if dependency in blocked_dependencies
                 ]
-                result = self._dependency_blocked_result(task, failed_dependencies)
+                result = self._dependency_blocked_result(
+                    task, failed_dependencies
+                )
                 blocked_dependencies[task.id] = result
                 results.append(result)
                 pending.pop(task.id, None)
@@ -194,18 +244,27 @@ class WorkflowOrchestrator(BaseAgent):
             ready = [
                 task
                 for task in pending.values()
-                if all(dependency in completed for dependency in task.dependencies)
+                if all(
+                    dependency in completed for dependency in task.dependencies
+                )
             ]
             if not ready:
                 for task in pending.values():
-                    result = self._error_result(task, "任务依赖存在循环或缺失依赖。", error_kind="dependency_cycle_or_missing")
+                    result = self._error_result(
+                        task,
+                        "任务依赖存在循环或缺失依赖。",
+                        error_kind="dependency_cycle_or_missing",
+                    )
                     blocked_dependencies[task.id] = result
                     results.append(result)
                 break
 
             batch = ready[: spec.max_parallel_tasks]
             batch_results = await asyncio.gather(
-                *(self._run_single_task(task, spec, context) for task in batch),
+                *(
+                    self._run_single_task(task, spec, context)
+                    for task in batch
+                ),
                 return_exceptions=False,
             )
             for task, result in zip(batch, batch_results):
@@ -241,19 +300,33 @@ class WorkflowOrchestrator(BaseAgent):
                 runner(task, spec, context),
                 timeout=self._task_timeout_seconds(context),
             )
-            result = raw_result if isinstance(raw_result, WorkflowTaskResult) else WorkflowTaskResult.model_validate(raw_result)
+            result = (
+                raw_result
+                if isinstance(raw_result, WorkflowTaskResult)
+                else WorkflowTaskResult.model_validate(raw_result)
+            )
             result.started_at = result.started_at or started_at
-            result.completed_at = result.completed_at or datetime.now(timezone.utc)
+            result.completed_at = result.completed_at or datetime.now(
+                timezone.utc
+            )
             return result
         except TimeoutError:
             return self._error_result(
                 task,
-                f"{task.agent_name} 执行超过 {self._task_timeout_seconds(context):g} 秒。",
+                (
+                    f"{task.agent_name} 执行超过 "
+                    f"{self._task_timeout_seconds(context):g} 秒。"
+                ),
                 started_at=started_at,
                 error_kind="timeout",
             )
         except Exception as exc:
-            return self._error_result(task, str(exc), started_at=started_at, error_kind="task_runtime_error")
+            return self._error_result(
+                task,
+                str(exc),
+                started_at=started_at,
+                error_kind="task_runtime_error",
+            )
 
     def _error_result(
         self,
@@ -275,21 +348,34 @@ class WorkflowOrchestrator(BaseAgent):
             completed_at=datetime.now(timezone.utc),
         )
 
-    def _dependency_blocked_result(self, task: WorkflowTask, failed_dependencies: list[str]) -> WorkflowTaskResult:
+    def _dependency_blocked_result(
+        self, task: WorkflowTask, failed_dependencies: list[str]
+    ) -> WorkflowTaskResult:
         return WorkflowTaskResult(
             task_id=task.id,
             agent_name=task.agent_name,
             task_type=task.task_type,
             status="skipped",
-            summary=f"{task.agent_name} 未执行，因为依赖任务未成功：{', '.join(failed_dependencies)}。",
-            output={"error_kind": "dependency_failed", "failed_dependencies": failed_dependencies},
+            summary=(
+                f"{task.agent_name} 未执行，因为依赖任务未成功："
+                f"{', '.join(failed_dependencies)}。"
+            ),
+            output={
+                "error_kind": "dependency_failed",
+                "failed_dependencies": failed_dependencies,
+            },
             confidence=0.0,
             completed_at=datetime.now(timezone.utc),
         )
 
     def _task_timeout_seconds(self, context: dict[str, Any]) -> float:
         try:
-            value = float(context.get("workflow_task_timeout_seconds", settings.workflow_task_timeout_seconds))
+            value = float(
+                context.get(
+                    "workflow_task_timeout_seconds",
+                    settings.workflow_task_timeout_seconds,
+                )
+            )
         except (TypeError, ValueError):
             value = settings.workflow_task_timeout_seconds
         return max(0.001, value)
@@ -303,7 +389,11 @@ class WorkflowOrchestrator(BaseAgent):
             requested = 1
         return max(0, min(2, requested))
 
-    def _replan_reason(self, results: list[WorkflowTaskResult], observation: WorkflowObservation) -> str | None:
+    def _replan_reason(
+        self,
+        results: list[WorkflowTaskResult],
+        observation: WorkflowObservation,
+    ) -> str | None:
         fixable_findings = {
             "task_error",
             "task_skipped",
@@ -315,18 +405,29 @@ class WorkflowOrchestrator(BaseAgent):
         }
         for finding in observation.findings:
             if finding.finding_type in fixable_findings:
-                return f"{finding.finding_type}: {finding.recommendation or finding.message}"
+                return (
+                    f"{finding.finding_type}: "
+                    f"{finding.recommendation or finding.message}"
+                )
         if any(result.status == "error" for result in results):
             return "task_error: at least one workflow task failed"
         low_confidence_results = [
             result
             for result in results
-            if result.status == "success" and result.confidence is not None and result.confidence < 0.45
+            if result.status == "success"
+            and result.confidence is not None
+            and result.confidence < 0.45
         ]
         if low_confidence_results:
-            return "low_confidence: one or more successful task results have weak confidence"
+            return (
+                "low_confidence: one or more successful task results have "
+                "weak confidence"
+            )
         if results and observation.overall_confidence < 0.45:
-            return "low_confidence: observer confidence is below the workflow threshold"
+            return (
+                "low_confidence: observer confidence is below the workflow"
+                " threshold"
+            )
         return None
 
     def _normalize_replanned_spec(
@@ -339,18 +440,30 @@ class WorkflowOrchestrator(BaseAgent):
         normalized = next_spec.model_copy(deep=True)
         normalized.workflow_id = original_spec.workflow_id
         normalized.goal = normalized.goal or current_spec.goal
-        normalized.trigger_message = normalized.trigger_message or current_spec.trigger_message
+        normalized.trigger_message = (
+            normalized.trigger_message or current_spec.trigger_message
+        )
         if not normalized.acceptance_criteria:
-            normalized.acceptance_criteria = list(current_spec.acceptance_criteria)
+            normalized.acceptance_criteria = list(
+                current_spec.acceptance_criteria
+            )
         normalized.max_parallel_tasks = current_spec.max_parallel_tasks
         normalized.requires_human_confirmation = (
-            current_spec.requires_human_confirmation or normalized.requires_human_confirmation
+            current_spec.requires_human_confirmation
+            or normalized.requires_human_confirmation
         )
         return normalized
 
-    def _same_task_graph(self, left: WorkflowSpec, right: WorkflowSpec) -> bool:
-        def signature(spec: WorkflowSpec) -> list[tuple[str, str, tuple[str, ...]]]:
-            return [(task.id, task.task_type, tuple(task.dependencies)) for task in spec.tasks]
+    def _same_task_graph(
+        self, left: WorkflowSpec, right: WorkflowSpec
+    ) -> bool:
+        def signature(
+            spec: WorkflowSpec,
+        ) -> list[tuple[str, str, tuple[str, ...]]]:
+            return [
+                (task.id, task.task_type, tuple(task.dependencies))
+                for task in spec.tasks
+            ]
 
         return signature(left) == signature(right)
 
@@ -388,7 +501,9 @@ class WorkflowOrchestrator(BaseAgent):
         )
         return calls
 
-    def _citations(self, results: list[WorkflowTaskResult]) -> list[dict[str, Any]]:
+    def _citations(
+        self, results: list[WorkflowTaskResult]
+    ) -> list[dict[str, Any]]:
         citations: list[dict[str, Any]] = []
         seen: set[tuple[str, str, str]] = set()
         for result in results:
@@ -434,7 +549,11 @@ class WorkflowOrchestrator(BaseAgent):
                 }
             )
             for result in record["results"]:
-                skill_runtime = result.output.get("_skill_runtime") if isinstance(result.output, dict) else None
+                skill_runtime = (
+                    result.output.get("_skill_runtime")
+                    if isinstance(result.output, dict)
+                    else None
+                )
                 events.append(
                     {
                         "type": "workflow_task_result",
@@ -477,7 +596,10 @@ class WorkflowOrchestrator(BaseAgent):
                     "is_final": index == len(round_records) - 1,
                     "overall_confidence": observation.overall_confidence,
                     "human_review_required": observation.human_review_required,
-                    "findings": [finding.model_dump(mode="json") for finding in observation.findings],
+                    "findings": [
+                        finding.model_dump(mode="json")
+                        for finding in observation.findings
+                    ],
                 }
             )
         return events

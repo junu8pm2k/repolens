@@ -1,15 +1,25 @@
 from fastapi import APIRouter, HTTPException
 
-from app.schemas.skills import McpRuntimeResponse, McpToolResponse, SkillListResponse, SkillManifestResponse, SkillResponse
+from app.schemas.skills import (
+    McpRuntimeResponse,
+    McpToolResponse,
+    SkillListResponse,
+    SkillManifestResponse,
+    SkillResponse,
+)
 from app.services.mcp_client import McpClientError, StdioMcpClient
 from app.services.skills import get_skill_registry
 
 router = APIRouter()
 
 
-def _skill_response(skill, include_instructions: bool = False) -> SkillResponse:
+def _skill_response(
+    skill, include_instructions: bool = False
+) -> SkillResponse:
     return SkillResponse(
-        manifest=SkillManifestResponse.model_validate(skill.manifest.model_dump()),
+        manifest=SkillManifestResponse.model_validate(
+            skill.manifest.model_dump()
+        ),
         path=skill.path,
         instructions=skill.instructions if include_instructions else None,
     )
@@ -18,7 +28,9 @@ def _skill_response(skill, include_instructions: bool = False) -> SkillResponse:
 @router.get("", response_model=SkillListResponse)
 async def list_skills() -> SkillListResponse:
     registry = get_skill_registry()
-    return SkillListResponse(skills=[_skill_response(skill) for skill in registry.list_skills()])
+    return SkillListResponse(
+        skills=[_skill_response(skill) for skill in registry.list_skills()]
+    )
 
 
 @router.get("/mcp-status", response_model=McpRuntimeResponse)
@@ -26,7 +38,9 @@ async def get_mcp_status() -> McpRuntimeResponse:
     try:
         inspection = await StdioMcpClient().inspect_server()
     except (McpClientError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"MCP Server 验证失败：{exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"MCP Server 验证失败：{exc}"
+        ) from exc
 
     initialize = inspection.get("initialize") or {}
     server_info = initialize.get("serverInfo") or {}

@@ -13,12 +13,23 @@ from sqlalchemy.orm import Session
 
 from app.db.models import ProjectIndexState, Repository
 from app.db.session import SessionLocal
+from app.services.code_analysis import (
+    _repo_checkout_path,
+    _stored_checkout_path,
+)
 from app.services.knowledge_graph import rebuild_knowledge_graph
 from app.services.rag.chunking import chunk_document
-from app.services.code_analysis import _repo_checkout_path, _stored_checkout_path
-from app.services.rag.vector_store import DocumentPayload, replace_documents, stable_source_id
+from app.services.rag.vector_store import (
+    DocumentPayload,
+    replace_documents,
+    stable_source_id,
+)
 
-PROJECT_INDEX_SOURCE_TYPES = ["project_overview", "project_doc", "project_manifest"]
+PROJECT_INDEX_SOURCE_TYPES = [
+    "project_overview",
+    "project_doc",
+    "project_manifest",
+]
 PROJECT_INDEX_STATUSES = {"missing", "stale", "building", "ready", "failed"}
 PROJECT_INDEX_CONFIG_PATH = Path(".repolens/index.yml")
 PROJECT_INDEX_MODES = {"auto", "allowlist"}
@@ -56,7 +67,14 @@ SKIP_DIRS = {
     ".ruff_cache",
 }
 INDEXABLE_HIDDEN_DIRS = {".github"}
-SECRET_NAMES = {".env", ".env.local", ".env.production", ".npmrc", ".pypirc", "credentials.json"}
+SECRET_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".npmrc",
+    ".pypirc",
+    "credentials.json",
+}
 SECRET_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
 
@@ -125,7 +143,11 @@ def _safe_project_root(repo: Repository) -> Path | None:
 
 def _is_secret(path: Path) -> bool:
     name = path.name
-    return name in SECRET_NAMES or path.suffix.lower() in SECRET_SUFFIXES or name.lower().startswith("credentials")
+    return (
+        name in SECRET_NAMES
+        or path.suffix.lower() in SECRET_SUFFIXES
+        or name.lower().startswith("credentials")
+    )
 
 
 def _read_text(path: Path, max_bytes: int = 400_000) -> str | None:
@@ -155,9 +177,15 @@ def _classify_file(path: Path, rel: str) -> tuple[str, str] | None:
     stem = _stem_upper(path)
     rel_posix = rel.replace("\\", "/")
     if path.suffix.lower() == ".md":
-        if rel_posix.startswith("docs/") or stem in AUTHORITATIVE_TOP_LEVEL or stem.startswith("ADR"):
+        if (
+            rel_posix.startswith("docs/")
+            or stem in AUTHORITATIVE_TOP_LEVEL
+            or stem.startswith("ADR")
+        ):
             return "project_doc", "authoritative"
-        if stem in SOFT_CLUE_TOP_LEVEL or rel_posix.startswith(".github/ISSUE_TEMPLATE/"):
+        if stem in SOFT_CLUE_TOP_LEVEL or rel_posix.startswith(
+            ".github/ISSUE_TEMPLATE/"
+        ):
             return "project_doc", "soft_clue"
     if name in MANIFEST_FILES:
         return "project_manifest", "derived"
@@ -176,7 +204,9 @@ def _normalize_patterns(value: Any, field_name: str) -> tuple[str, ...]:
     if value is None:
         return ()
     if not isinstance(value, list):
-        raise ValueError(f"{field_name} must be a list of repository-relative glob patterns")
+        raise ValueError(
+            f"{field_name} must be a list of repository-relative glob patterns"
+        )
     patterns: list[str] = []
     for raw_pattern in value:
         if not isinstance(raw_pattern, str) or not raw_pattern.strip():
@@ -186,7 +216,9 @@ def _normalize_patterns(value: Any, field_name: str) -> tuple[str, ...]:
             pattern = pattern[2:]
         pattern = pattern.lstrip("/")
         if pattern == ".." or pattern.startswith("../"):
-            raise ValueError(f"{field_name} patterns must stay inside the repository")
+            raise ValueError(
+                f"{field_name} patterns must stay inside the repository"
+            )
         if pattern.endswith("/"):
             pattern += "**"
         patterns.append(pattern)
@@ -201,22 +233,42 @@ def load_project_index_policy(root: Path) -> ProjectIndexPolicy:
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ValueError(f"Could not read {PROJECT_INDEX_CONFIG_PATH.as_posix()}: {exc}") from exc
+        raise ValueError(
+            f"Could not read {PROJECT_INDEX_CONFIG_PATH.as_posix()}: {exc}"
+        ) from exc
     if not isinstance(raw, dict):
-        raise ValueError(f"{PROJECT_INDEX_CONFIG_PATH.as_posix()} must contain a YAML object")
+        raise ValueError(
+            (
+                f"{PROJECT_INDEX_CONFIG_PATH.as_posix()} must contain a YAML "
+                f"object"
+            )
+        )
     version = raw.get("version", 1)
     if version != 1:
-        raise ValueError(f"Unsupported project index config version: {version}")
+        raise ValueError(
+            f"Unsupported project index config version: {version}"
+        )
     project_docs = raw.get("project_docs") or {}
     if not isinstance(project_docs, dict):
         raise ValueError("project_docs must be a YAML object")
     mode = str(project_docs.get("mode") or "auto").strip().lower()
     if mode not in PROJECT_INDEX_MODES:
-        raise ValueError(f"project_docs.mode must be one of: {', '.join(sorted(PROJECT_INDEX_MODES))}")
-    include = _normalize_patterns(project_docs.get("include"), "project_docs.include")
-    exclude = _normalize_patterns(project_docs.get("exclude"), "project_docs.exclude")
+        raise ValueError(
+            (
+                f"project_docs.mode must be one of: "
+                f"{', '.join(sorted(PROJECT_INDEX_MODES))}"
+            )
+        )
+    include = _normalize_patterns(
+        project_docs.get("include"), "project_docs.include"
+    )
+    exclude = _normalize_patterns(
+        project_docs.get("exclude"), "project_docs.exclude"
+    )
     if mode == "allowlist" and not include:
-        raise ValueError("project_docs.include cannot be empty when mode is allowlist")
+        raise ValueError(
+            "project_docs.include cannot be empty when mode is allowlist"
+        )
     include_manifests = raw.get("include_manifests", True)
     if not isinstance(include_manifests, bool):
         raise ValueError("include_manifests must be true or false")
@@ -230,10 +282,14 @@ def load_project_index_policy(root: Path) -> ProjectIndexPolicy:
 
 
 def _matches_any(relative_path: str, patterns: tuple[str, ...]) -> bool:
-    return any(fnmatch.fnmatchcase(relative_path, pattern) for pattern in patterns)
+    return any(
+        fnmatch.fnmatchcase(relative_path, pattern) for pattern in patterns
+    )
 
 
-def _policy_allows(candidate: ProjectDocCandidate, policy: ProjectIndexPolicy) -> bool:
+def _policy_allows(
+    candidate: ProjectDocCandidate, policy: ProjectIndexPolicy
+) -> bool:
     if _matches_any(candidate.relative_path, policy.exclude):
         return False
     if candidate.source_type == "project_manifest":
@@ -243,7 +299,9 @@ def _policy_allows(candidate: ProjectDocCandidate, policy: ProjectIndexPolicy) -
     return True
 
 
-def _discover_project_docs(root: Path, max_files: int = 500) -> ProjectDocDiscovery:
+def _discover_project_docs(
+    root: Path, max_files: int = 500
+) -> ProjectDocDiscovery:
     root = root.resolve()
     policy = load_project_index_policy(root)
     results: list[ProjectDocCandidate] = []
@@ -253,7 +311,8 @@ def _discover_project_docs(root: Path, max_files: int = 500) -> ProjectDocDiscov
         dir_names[:] = sorted(
             name
             for name in dir_names
-            if name not in SKIP_DIRS and (not name.startswith(".") or name in INDEXABLE_HIDDEN_DIRS)
+            if name not in SKIP_DIRS
+            and (not name.startswith(".") or name in INDEXABLE_HIDDEN_DIRS)
         )
         for filename in sorted(file_names):
             path = Path(current_root) / filename
@@ -264,7 +323,12 @@ def _discover_project_docs(root: Path, max_files: int = 500) -> ProjectDocDiscov
             if not classification:
                 continue
             source_type, tier = classification
-            candidate = ProjectDocCandidate(path=path, relative_path=rel, source_type=source_type, tier=tier)
+            candidate = ProjectDocCandidate(
+                path=path,
+                relative_path=rel,
+                source_type=source_type,
+                tier=tier,
+            )
             if not _policy_allows(candidate, policy):
                 excluded_paths.append(rel)
                 continue
@@ -277,7 +341,9 @@ def _discover_project_docs(root: Path, max_files: int = 500) -> ProjectDocDiscov
     return ProjectDocDiscovery(results, excluded_paths, policy, truncated)
 
 
-def discover_project_docs(root: Path, max_files: int = 500) -> list[ProjectDocCandidate]:
+def discover_project_docs(
+    root: Path, max_files: int = 500
+) -> list[ProjectDocCandidate]:
     return _discover_project_docs(root, max_files=max_files).candidates
 
 
@@ -287,7 +353,11 @@ def project_fingerprint(repo: Repository) -> str:
         return ""
     hasher = hashlib.sha256()
     discovery = _discover_project_docs(root, max_files=1000)
-    hasher.update(json.dumps(discovery.policy.as_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8"))
+    hasher.update(
+        json.dumps(
+            discovery.policy.as_dict(), ensure_ascii=False, sort_keys=True
+        ).encode("utf-8")
+    )
     for candidate in discovery.candidates:
         try:
             stat = candidate.path.stat()
@@ -300,8 +370,14 @@ def project_fingerprint(repo: Repository) -> str:
     return f"files:{digest}"
 
 
-def _get_state_row(db: Session, repo_id: uuid.UUID) -> ProjectIndexState | None:
-    return db.query(ProjectIndexState).filter(ProjectIndexState.repo_id == repo_id).one_or_none()
+def _get_state_row(
+    db: Session, repo_id: uuid.UUID
+) -> ProjectIndexState | None:
+    return (
+        db.query(ProjectIndexState)
+        .filter(ProjectIndexState.repo_id == repo_id)
+        .one_or_none()
+    )
 
 
 def _get_or_create_state(db: Session, repo_id: uuid.UUID) -> ProjectIndexState:
@@ -314,8 +390,14 @@ def _get_or_create_state(db: Session, repo_id: uuid.UUID) -> ProjectIndexState:
     return row
 
 
-def _state_payload(repo: Repository, row: ProjectIndexState | None, fingerprint: str | None = None) -> dict[str, Any]:
-    current_fingerprint = fingerprint if fingerprint is not None else project_fingerprint(repo)
+def _state_payload(
+    repo: Repository,
+    row: ProjectIndexState | None,
+    fingerprint: str | None = None,
+) -> dict[str, Any]:
+    current_fingerprint = (
+        fingerprint if fingerprint is not None else project_fingerprint(repo)
+    )
     if row is None:
         return {
             "repo_id": repo.id,
@@ -329,7 +411,11 @@ def _state_payload(repo: Repository, row: ProjectIndexState | None, fingerprint:
             "last_scan_at": None,
         }
     status = row.status if row.status in PROJECT_INDEX_STATUSES else "missing"
-    if status == "ready" and current_fingerprint and row.fingerprint != current_fingerprint:
+    if (
+        status == "ready"
+        and current_fingerprint
+        and row.fingerprint != current_fingerprint
+    ):
         status = "stale"
     return {
         "repo_id": row.repo_id,
@@ -348,7 +434,9 @@ def get_project_index_state(db: Session, repo: Repository) -> dict[str, Any]:
     return _state_payload(repo, _get_state_row(db, repo.id))
 
 
-def mark_project_index_building(db: Session, repo: Repository) -> ProjectIndexState:
+def mark_project_index_building(
+    db: Session, repo: Repository
+) -> ProjectIndexState:
     row = _get_or_create_state(db, repo.id)
     row.status = "building"
     row.fingerprint = project_fingerprint(repo)
@@ -359,7 +447,9 @@ def mark_project_index_building(db: Session, repo: Repository) -> ProjectIndexSt
     return row
 
 
-def snooze_project_index(db: Session, repo: Repository, days: int = 7) -> ProjectIndexState:
+def snooze_project_index(
+    db: Session, repo: Repository, days: int = 7
+) -> ProjectIndexState:
     row = _get_or_create_state(db, repo.id)
     row.snoozed_until = _now() + timedelta(days=days)
     row.updated_at = _now()
@@ -384,11 +474,24 @@ def _summary_from_text(text: str, limit: int = 360) -> str:
         return ""
     paragraphs = []
     for block in cleaned.split("\n\n"):
-        value = " ".join(line.strip() for line in block.splitlines() if line.strip())
-        if value and not value.startswith("#") and not value.startswith("|") and not value.startswith("```"):
+        value = " ".join(
+            line.strip() for line in block.splitlines() if line.strip()
+        )
+        if (
+            value
+            and not value.startswith("#")
+            and not value.startswith("|")
+            and not value.startswith("```")
+        ):
             paragraphs.append(value)
-    summary = paragraphs[0] if paragraphs else " ".join(cleaned.splitlines()[:4])
-    return summary[: limit - 3].rstrip() + "..." if len(summary) > limit else summary
+    summary = (
+        paragraphs[0] if paragraphs else " ".join(cleaned.splitlines()[:4])
+    )
+    return (
+        summary[: limit - 3].rstrip() + "..."
+        if len(summary) > limit
+        else summary
+    )
 
 
 def _detect_tech_stack(root: Path) -> list[str]:
@@ -402,13 +505,19 @@ def _detect_tech_stack(root: Path) -> list[str]:
         "pom.xml": "java",
         "build.gradle": "java",
     }
-    return [tech for filename, tech in detectors.items() if (root / filename).exists()]
+    return [
+        tech
+        for filename, tech in detectors.items()
+        if (root / filename).exists()
+    ]
 
 
 def _safe_dirs(root: Path, limit: int = 12) -> list[str]:
     dirs: list[str] = []
     try:
-        for child in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+        for child in sorted(
+            root.iterdir(), key=lambda item: item.name.lower()
+        ):
             if len(dirs) >= limit:
                 break
             if child.name.startswith(".") or child.name in SKIP_DIRS:
@@ -432,8 +541,16 @@ def _build_summary(
     docs_list: list[dict[str, str]] = []
     for item in candidates:
         tier_coverage[item.tier] = tier_coverage.get(item.tier, 0) + 1
-        source_type_coverage[item.source_type] = source_type_coverage.get(item.source_type, 0) + 1
-        docs_list.append({"path": item.relative_path, "tier": item.tier, "source_type": item.source_type})
+        source_type_coverage[item.source_type] = (
+            source_type_coverage.get(item.source_type, 0) + 1
+        )
+        docs_list.append(
+            {
+                "path": item.relative_path,
+                "tier": item.tier,
+                "source_type": item.source_type,
+            }
+        )
     return {
         "projectName": repo.full_name,
         "rootPath": str(root),
@@ -450,16 +567,25 @@ def _build_summary(
     }
 
 
-def _payloads_for_candidates(repo: Repository, root: Path, candidates: list[ProjectDocCandidate], fingerprint: str) -> list[DocumentPayload]:
+def _payloads_for_candidates(
+    repo: Repository,
+    root: Path,
+    candidates: list[ProjectDocCandidate],
+    fingerprint: str,
+) -> list[DocumentPayload]:
     payloads: list[DocumentPayload] = []
     scanned_at = _now().isoformat()
     for candidate in candidates:
         text = _read_text(candidate.path)
         if not text or not text.strip():
             continue
-        source_id = stable_source_id(repo.id, candidate.source_type, candidate.relative_path)
+        source_id = stable_source_id(
+            repo.id, candidate.source_type, candidate.relative_path
+        )
         title = _extract_title(text, candidate.relative_path)
-        chunks = chunk_document(text, candidate.relative_path, max_chars=1800, overlap=180)
+        chunks = chunk_document(
+            text, candidate.relative_path, max_chars=1800, overlap=180
+        )
         for index, chunk in enumerate(chunks):
             content = str(chunk["content"])
             section_title = chunk.get("section_title")
@@ -467,10 +593,18 @@ def _payloads_for_candidates(repo: Repository, root: Path, candidates: list[Proj
                 DocumentPayload(
                     source_type=candidate.source_type,
                     source_id=source_id,
-                    title=f"{title} · {section_title}" if section_title else (f"{title}#{index + 1}" if len(chunks) > 1 else title),
+                    title=f"{title} · {section_title}"
+                    if section_title
+                    else (
+                        f"{title}#{index + 1}" if len(chunks) > 1 else title
+                    ),
                     content=content,
                     metadata={
-                        **{key: value for key, value in chunk.items() if key != "content" and value is not None},
+                        **{
+                            key: value
+                            for key, value in chunk.items()
+                            if key != "content" and value is not None
+                        },
                         "display_title": title,
                         "path": candidate.relative_path,
                         "root_path": str(root),
@@ -500,7 +634,9 @@ def scan_project_index(db: Session, repo: Repository) -> dict[str, Any]:
     try:
         root = _safe_project_root(repo)
         if not root:
-            raise RuntimeError("项目本地路径不存在，请先连接本地仓库或完成代码同步")
+            raise RuntimeError(
+                "项目本地路径不存在，请先连接本地仓库或完成代码同步"
+            )
 
         discovery = _discover_project_docs(root)
         candidates = discovery.candidates
@@ -510,16 +646,25 @@ def scan_project_index(db: Session, repo: Repository) -> dict[str, Any]:
             "description": repo.description or "",
             "default_branch": repo.default_branch or "",
             "local_path": str(root),
-            "indexed_files": [candidate.relative_path for candidate in candidates[:80]],
+            "indexed_files": [
+                candidate.relative_path for candidate in candidates[:80]
+            ],
         }
         payloads.insert(
             0,
             DocumentPayload(
                 source_type="project_overview",
-                source_id=stable_source_id(repo.id, "project_overview", "overview"),
+                source_id=stable_source_id(
+                    repo.id, "project_overview", "overview"
+                ),
                 title=f"项目概况：{repo.full_name}",
                 content=json.dumps(overview, ensure_ascii=False, indent=2),
-                metadata={"display_title": "项目概况", "fingerprint": fp, "root_path": str(root), "chunk_index": 0},
+                metadata={
+                    "display_title": "项目概况",
+                    "fingerprint": fp,
+                    "root_path": str(root),
+                    "chunk_index": 0,
+                },
             ),
         )
 

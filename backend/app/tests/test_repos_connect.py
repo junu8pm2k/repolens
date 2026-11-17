@@ -2,19 +2,35 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.routes.repos import _clone_target_from_parent, _infer_provider, _parse_git_remote_url
+from app.api.routes.repos import (
+    _clone_target_from_parent,
+    _infer_provider,
+    _parse_git_remote_url,
+)
 from app.schemas.repos import RepoConnectRequest
 
 
 @pytest.mark.parametrize(
     ("remote_url", "owner", "repo", "host"),
     [
-        ("https://github.com/openai/codex.git", "openai", "codex", "github.com"),
+        (
+            "https://github.com/openai/codex.git",
+            "openai",
+            "codex",
+            "github.com",
+        ),
         ("git@github.com:openai/codex.git", "openai", "codex", "github.com"),
-        ("ssh://git@github.example.com/platform/repolens.git", "platform", "repolens", "github.example.com"),
+        (
+            "ssh://git@github.example.com/platform/repolens.git",
+            "platform",
+            "repolens",
+            "github.example.com",
+        ),
     ],
 )
-def test_parse_git_remote_url(remote_url: str, owner: str, repo: str, host: str) -> None:
+def test_parse_git_remote_url(
+    remote_url: str, owner: str, repo: str, host: str
+) -> None:
     parsed = _parse_git_remote_url(remote_url)
 
     assert parsed.owner == owner
@@ -23,7 +39,9 @@ def test_parse_git_remote_url(remote_url: str, owner: str, repo: str, host: str)
 
 
 def test_infer_provider_for_custom_remote_host() -> None:
-    assert _infer_provider("github", "github.example.com") == "github_compatible"
+    assert (
+        _infer_provider("github", "github.example.com") == "github_compatible"
+    )
     assert _infer_provider("github", "github.com") == "github"
 
 
@@ -36,7 +54,9 @@ def test_clone_target_from_parent_rejects_occupied_directory(tmp_path) -> None:
         _clone_target_from_parent(str(tmp_path), "codex")
 
 
-def test_clone_target_from_parent_creates_missing_parent_directories(tmp_path) -> None:
+def test_clone_target_from_parent_creates_missing_parent_directories(
+    tmp_path,
+) -> None:
     parent = tmp_path / "downloads" / "nested"
     target = _clone_target_from_parent(str(parent), "codex")
 
@@ -46,7 +66,9 @@ def test_clone_target_from_parent_creates_missing_parent_directories(tmp_path) -
 
 
 def test_repo_connect_request_uses_a_small_bounded_initial_sync() -> None:
-    payload = RepoConnectRequest(owner="openai", repo="openai-quickstart-python")
+    payload = RepoConnectRequest(
+        owner="openai", repo="openai-quickstart-python"
+    )
 
     assert payload.initial_sync_limit == 5
     assert payload.sync_issues is True
@@ -54,4 +76,8 @@ def test_repo_connect_request_uses_a_small_bounded_initial_sync() -> None:
     assert payload.sync_workflow_runs is True
 
     with pytest.raises(ValidationError):
-        RepoConnectRequest(owner="openai", repo="openai-quickstart-python", initial_sync_limit=0)
+        RepoConnectRequest(
+            owner="openai",
+            repo="openai-quickstart-python",
+            initial_sync_limit=0,
+        )

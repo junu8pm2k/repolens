@@ -14,7 +14,9 @@ class LLMClient:
         self.api_key = settings.llm_api_key
         self.model = settings.llm_model
 
-    async def chat_json(self, system_prompt: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+    async def chat_json(
+        self, system_prompt: str, user_payload: dict[str, Any]
+    ) -> dict[str, Any]:
         if not self.api_key:
             return {}
 
@@ -22,7 +24,10 @@ class LLMClient:
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                {
+                    "role": "user",
+                    "content": json.dumps(user_payload, ensure_ascii=False),
+                },
             ],
             "response_format": {"type": "json_object"},
         }
@@ -37,7 +42,13 @@ class LLMClient:
                 response.raise_for_status()
                 content = response.json()["choices"][0]["message"]["content"]
                 return json.loads(content)
-            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+            except (
+                httpx.HTTPError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ):
                 return {}
 
     async def chat_text(self, system_prompt: str, user_message: str) -> str:
@@ -61,17 +72,36 @@ class LLMClient:
                 )
                 response.raise_for_status()
                 message = response.json()["choices"][0]["message"]
-                content = message.get("content") if isinstance(message, dict) else None
+                content = (
+                    message.get("content")
+                    if isinstance(message, dict)
+                    else None
+                )
                 return content if isinstance(content, str) else ""
-            except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+            except (
+                httpx.HTTPError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+            ):
                 return ""
 
-    async def chat_text_stream(self, system_prompt: str, messages: list[dict[str, str]]) -> AsyncIterator[str]:
+    async def chat_text_stream(
+        self, system_prompt: str, messages: list[dict[str, str]]
+    ) -> AsyncIterator[str]:
         if not self.api_key:
             return
 
-        payload_messages = [{"role": "system", "content": system_prompt}, *messages]
-        payload: dict[str, Any] = {"model": self.model, "messages": payload_messages, "stream": True}
+        payload_messages = [
+            {"role": "system", "content": system_prompt},
+            *messages,
+        ]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": payload_messages,
+            "stream": True,
+        }
         payload.update(prompt_cache_model_kwargs())
         async with httpx.AsyncClient(timeout=60) as client:
             async with client.stream(

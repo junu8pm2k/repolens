@@ -7,8 +7,23 @@ from app.db.models import AuditLog, User
 from app.db.session import get_db
 
 ROLE_PERMISSIONS: dict[str, set[str]] = {
-    "owner": {"repo:read", "repo:sync", "agent:run", "draft:create", "draft:approve", "eval:read", "settings:manage"},
-    "maintainer": {"repo:read", "repo:sync", "agent:run", "draft:create", "draft:approve", "eval:read"},
+    "owner": {
+        "repo:read",
+        "repo:sync",
+        "agent:run",
+        "draft:create",
+        "draft:approve",
+        "eval:read",
+        "settings:manage",
+    },
+    "maintainer": {
+        "repo:read",
+        "repo:sync",
+        "agent:run",
+        "draft:create",
+        "draft:approve",
+        "eval:read",
+    },
     "developer": {"repo:read", "agent:run", "draft:create", "eval:read"},
     "viewer": {"repo:read", "eval:read"},
 }
@@ -29,14 +44,18 @@ def ensure_demo_user(db: Session) -> User:
 
 
 def has_permission(user: User, permission: str) -> bool:
-    return permission in ROLE_PERMISSIONS.get((user.role or "viewer").lower(), set())
+    return permission in ROLE_PERMISSIONS.get(
+        (user.role or "viewer").lower(), set()
+    )
 
 
 def require_permission(permission: str) -> Callable:
     def dependency(db: Session = Depends(get_db)) -> User:
         user = ensure_demo_user(db)
         if not has_permission(user, permission):
-            raise HTTPException(status_code=403, detail=f"需要权限：{permission}")
+            raise HTTPException(
+                status_code=403, detail=f"需要权限：{permission}"
+            )
         return user
 
     return dependency

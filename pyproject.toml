@@ -1,0 +1,16 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 79
+indent-width = 4
+extend-exclude = [".data", ".codex_tmp", "probe-py-b"]
+
+[tool.ruff.lint]
+select = ["E4", "E5", "E7", "E9", "W", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

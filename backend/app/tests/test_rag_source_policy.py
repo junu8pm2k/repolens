@@ -24,13 +24,28 @@ from app.db.models import (
     Repository,
     WorkflowRun,
 )
-from app.services.chat_memory import ContextAssembler, EvidenceStore, SessionSealer
-from app.services.rag.indexing import CI_LOG_CHUNK_CHARS, index_repository_documents
-from app.services.rag.knowledge_base import get_or_create_config, retrieve_knowledge
+from app.services.chat_memory import (
+    ContextAssembler,
+    EvidenceStore,
+    SessionSealer,
+)
+from app.services.rag.indexing import (
+    CI_LOG_CHUNK_CHARS,
+    index_repository_documents,
+)
+from app.services.rag.knowledge_base import (
+    get_or_create_config,
+    retrieve_knowledge,
+)
 from app.services.rag.qa import rag_status, reindex_documents
 from app.services.rag.retrieval import search_similar_documents
 from app.services.rag.source_policy import retrieval_mode, should_vectorize
-from app.services.rag.vector_store import DocumentPayload, MilvusUnavailableError, add_documents, reset_milvus_store_cache
+from app.services.rag.vector_store import (
+    DocumentPayload,
+    MilvusUnavailableError,
+    add_documents,
+    reset_milvus_store_cache,
+)
 
 
 def _db_session():
@@ -65,7 +80,9 @@ class _FakeMilvusStore:
 def _install_fake_milvus(monkeypatch) -> _FakeMilvusStore:
     store = _FakeMilvusStore()
     monkeypatch.setattr(settings, "milvus_enabled", True)
-    monkeypatch.setattr("app.services.rag.vector_store._milvus_store", lambda: store)
+    monkeypatch.setattr(
+        "app.services.rag.vector_store._milvus_store", lambda: store
+    )
     return store
 
 
@@ -89,7 +106,9 @@ def _install_fake_milvus(monkeypatch) -> _FakeMilvusStore:
         ("future_unknown_type", "direct"),
     ],
 )
-def test_source_policy_separates_rag_and_direct_data(source_type, expected) -> None:
+def test_source_policy_separates_rag_and_direct_data(
+    source_type, expected
+) -> None:
     assert retrieval_mode(source_type) == expected
     assert should_vectorize(source_type) is (expected == "rag")
 
@@ -105,7 +124,9 @@ def test_knowledge_base_defaults_enable_score_threshold() -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_score_threshold_filters_results_below_point_five(monkeypatch) -> None:
+async def test_default_score_threshold_filters_results_below_point_five(
+    monkeypatch,
+) -> None:
     db = _db_session()
     repo = _repo(db)
     monkeypatch.setattr(
@@ -142,9 +163,21 @@ def test_add_documents_only_embeds_rag_sources(monkeypatch) -> None:
         db,
         repo.id,
         [
-            DocumentPayload(source_type="knowledge_file", title="Runbook", content="Rotate the token."),
-            DocumentPayload(source_type="team_member", title="Alice", content="Backend engineer"),
-            DocumentPayload(source_type="chat_session", title="Session", content="Raw transcript"),
+            DocumentPayload(
+                source_type="knowledge_file",
+                title="Runbook",
+                content="Rotate the token.",
+            ),
+            DocumentPayload(
+                source_type="team_member",
+                title="Alice",
+                content="Backend engineer",
+            ),
+            DocumentPayload(
+                source_type="chat_session",
+                title="Session",
+                content="Raw transcript",
+            ),
         ],
     )
 
@@ -153,7 +186,9 @@ def test_add_documents_only_embeds_rag_sources(monkeypatch) -> None:
     assert by_type["team_member"].meta["retrieval_mode"] == "direct"
     assert not hasattr(by_type["knowledge_file"], "embedding")
     assert len(store.upserts) == 1
-    assert [doc.source_type for doc in store.upserts[0][0]] == ["knowledge_file"]
+    assert [doc.source_type for doc in store.upserts[0][0]] == [
+        "knowledge_file"
+    ]
     assert store.upserts[0][1] == [_vector()]
 
 
@@ -167,14 +202,23 @@ def test_add_documents_rejects_source_code_documents(monkeypatch) -> None:
         add_documents(
             db,
             repo.id,
-            [DocumentPayload(source_type="code_file", title="auth.py", content="def rotate_token(): pass")],
+            [
+                DocumentPayload(
+                    source_type="code_file",
+                    title="auth.py",
+                    content="def rotate_token(): pass",
+                )
+            ],
         )
 
 
 def test_add_documents_rejects_partial_embedding_batches(monkeypatch) -> None:
     monkeypatch.setattr(settings, "milvus_enabled", False)
     reset_milvus_store_cache()
-    monkeypatch.setattr("app.services.rag.vector_store.embed_texts", lambda _texts, _dimensions: [])
+    monkeypatch.setattr(
+        "app.services.rag.vector_store.embed_texts",
+        lambda _texts, _dimensions: [],
+    )
     db = _db_session()
     repo = _repo(db)
 
@@ -182,13 +226,21 @@ def test_add_documents_rejects_partial_embedding_batches(monkeypatch) -> None:
         add_documents(
             db,
             repo.id,
-            [DocumentPayload(source_type="knowledge_file", title="Runbook", content="Rotate the token.")],
+            [
+                DocumentPayload(
+                    source_type="knowledge_file",
+                    title="Runbook",
+                    content="Rotate the token.",
+                )
+            ],
         )
 
     assert db.query(Document).count() == 0
 
 
-def test_general_rag_search_excludes_code_and_direct_records(monkeypatch) -> None:
+def test_general_rag_search_excludes_code_and_direct_records(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "milvus_enabled", False)
     reset_milvus_store_cache()
     db = _db_session()
@@ -200,7 +252,9 @@ def test_general_rag_search_excludes_code_and_direct_records(monkeypatch) -> Non
             DocumentPayload(
                 source_type="knowledge_file",
                 title="Authentication runbook",
-                content="Rotate the access token after authentication failure.",
+                content=(
+                    "Rotate the access token after authentication failure."
+                ),
             ),
             DocumentPayload(
                 source_type="team_member",
@@ -211,7 +265,10 @@ def test_general_rag_search_excludes_code_and_direct_records(monkeypatch) -> Non
         vectors=[_vector(), _vector()],
         sync_vector_store=False,
     )
-    monkeypatch.setattr("app.services.rag.retrieval.search_milvus_documents", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "app.services.rag.retrieval.search_milvus_documents",
+        lambda *_args, **_kwargs: [],
+    )
 
     general = search_similar_documents(
         db,
@@ -288,7 +345,9 @@ def test_vector_search_does_not_fall_back_to_database(monkeypatch) -> None:
         )
 
 
-def test_hybrid_search_falls_back_to_fulltext_when_milvus_is_disabled(monkeypatch) -> None:
+def test_hybrid_search_falls_back_to_fulltext_when_milvus_is_disabled(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "milvus_enabled", False)
     reset_milvus_store_cache()
     db = _db_session()
@@ -317,12 +376,16 @@ def test_hybrid_search_falls_back_to_fulltext_when_milvus_is_disabled(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_code_file_retrieval_is_rejected_without_query_embedding(monkeypatch) -> None:
+async def test_code_file_retrieval_is_rejected_without_query_embedding(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(settings, "milvus_enabled", False)
     reset_milvus_store_cache()
     monkeypatch.setattr(
         "app.services.rag.knowledge_base.embed_knowledge_query",
-        lambda *_args, **_kwargs: pytest.fail("code retrieval must not embed the query"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "code retrieval must not embed the query"
+        ),
     )
     db = _db_session()
     repo = _repo(db)
@@ -342,7 +405,9 @@ def test_reindex_uses_the_global_embedding_contract(monkeypatch) -> None:
     store = _install_fake_milvus(monkeypatch)
     monkeypatch.setattr(
         "app.services.rag.vector_store.embed_texts",
-        lambda *_args, **_kwargs: pytest.fail("repository refresh must not pre-embed with global settings"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "repository refresh must not pre-embed with global settings"
+        ),
     )
     calls: list[tuple[str, str, int, int]] = []
 
@@ -350,7 +415,9 @@ def test_reindex_uses_the_global_embedding_contract(monkeypatch) -> None:
         calls.append((provider, model, dimensions, len(texts)))
         return [_vector() for _text in texts]
 
-    monkeypatch.setattr("app.services.rag.qa.embed_knowledge_texts", fake_embed)
+    monkeypatch.setattr(
+        "app.services.rag.qa.embed_knowledge_texts", fake_embed
+    )
     db = _db_session()
     repo = _repo(db)
     db.add(
@@ -361,13 +428,28 @@ def test_reindex_uses_the_global_embedding_contract(monkeypatch) -> None:
             embedding_dimensions=settings.embedding_dimensions,
         )
     )
-    db.add(Issue(repo_id=repo.id, number=3, title="Token expiry", body="Refresh once.", state="open"))
+    db.add(
+        Issue(
+            repo_id=repo.id,
+            number=3,
+            title="Token expiry",
+            body="Refresh once.",
+            state="open",
+        )
+    )
     db.commit()
 
     indexed = reindex_documents(db, repo.id)
 
     assert indexed == 1
-    assert calls == [(settings.embedding_provider, settings.embedding_model, settings.embedding_dimensions, 1)]
+    assert calls == [
+        (
+            settings.embedding_provider,
+            settings.embedding_model,
+            settings.embedding_dimensions,
+            1,
+        )
+    ]
     assert len(store.upserts) == 1
 
 
@@ -387,13 +469,17 @@ def test_reindex_rejects_partial_embedding_batches(monkeypatch) -> None:
         )
     )
     db.commit()
-    monkeypatch.setattr("app.services.rag.qa.embed_texts", lambda _texts, _dimensions: [])
+    monkeypatch.setattr(
+        "app.services.rag.qa.embed_texts", lambda _texts, _dimensions: []
+    )
 
     with pytest.raises(ValueError, match="embedding count"):
         reindex_documents(db, repo.id)
 
 
-def test_reindex_clears_legacy_metadata_and_status_only_counts_rag(monkeypatch) -> None:
+def test_reindex_clears_legacy_metadata_and_status_only_counts_rag(
+    monkeypatch,
+) -> None:
     _install_fake_milvus(monkeypatch)
     monkeypatch.setattr(
         "app.services.rag.vector_store.embed_texts",
@@ -409,8 +495,16 @@ def test_reindex_clears_legacy_metadata_and_status_only_counts_rag(monkeypatch) 
         db,
         repo.id,
         [
-            DocumentPayload(source_type="memory_note", title="Decision", content="Use short-lived tokens."),
-            DocumentPayload(source_type="weekly_report", title="Weekly", content="Two pull requests merged."),
+            DocumentPayload(
+                source_type="memory_note",
+                title="Decision",
+                content="Use short-lived tokens.",
+            ),
+            DocumentPayload(
+                source_type="weekly_report",
+                title="Weekly",
+                content="Two pull requests merged.",
+            ),
         ],
     )
     weekly = next(doc for doc in docs if doc.source_type == "weekly_report")
@@ -469,13 +563,33 @@ def test_reindex_clears_legacy_metadata_and_status_only_counts_rag(monkeypatch) 
     assert status["document_count"] == 1
     assert status["source_types"] == {"memory_note": 1}
     assert db.query(Document).filter(Document.repo_id == repo.id).count() == 2
-    assert db.query(Document).filter(Document.title == "Legacy raw chat").count() == 0
-    assert db.query(Document).filter(Document.content == "SENSITIVE_PATCH_FROM_OLD_INDEX").count() == 0
-    assert db.query(Document).filter(Document.title == "Legacy passing run").count() == 0
-    assert db.query(Document).filter(Document.title == "Legacy source chunk").count() == 0
+    assert (
+        db.query(Document).filter(Document.title == "Legacy raw chat").count()
+        == 0
+    )
+    assert (
+        db.query(Document)
+        .filter(Document.content == "SENSITIVE_PATCH_FROM_OLD_INDEX")
+        .count()
+        == 0
+    )
+    assert (
+        db.query(Document)
+        .filter(Document.title == "Legacy passing run")
+        .count()
+        == 0
+    )
+    assert (
+        db.query(Document)
+        .filter(Document.title == "Legacy source chunk")
+        .count()
+        == 0
+    )
 
 
-def test_repository_index_only_embeds_unstructured_historical_fields(monkeypatch) -> None:
+def test_repository_index_only_embeds_unstructured_historical_fields(
+    monkeypatch,
+) -> None:
     _install_fake_milvus(monkeypatch)
     monkeypatch.setattr(
         "app.services.rag.vector_store.embed_texts",
@@ -552,7 +666,10 @@ def test_repository_index_only_embeds_unstructured_historical_fields(monkeypatch
     assert "state:" not in by_type["issue"].content
     assert "labels:" not in by_type["issue"].content
     assert by_type["issue"].meta["state"] == "open"
-    assert "SENSITIVE_PATCH_SHOULD_NOT_BE_EMBEDDED" not in by_type["pull_request"].content
+    assert (
+        "SENSITIVE_PATCH_SHOULD_NOT_BE_EMBEDDED"
+        not in by_type["pull_request"].content
+    )
     assert "Keep the retry idempotent." in by_type["pull_request"].content
     assert by_type["pull_request"].meta["files"] == ["auth.py"]
     workflow_docs = [doc for doc in docs if doc.source_type == "workflow_run"]
@@ -560,11 +677,15 @@ def test_repository_index_only_embeds_unstructured_historical_fields(monkeypatch
     assert "test_refresh_retry failed with 401" in workflow_docs[0].content
 
 
-def test_repository_sync_respects_global_embedding_contract(monkeypatch) -> None:
+def test_repository_sync_respects_global_embedding_contract(
+    monkeypatch,
+) -> None:
     store = _install_fake_milvus(monkeypatch)
     monkeypatch.setattr(
         "app.services.rag.vector_store.embed_texts",
-        lambda *_args, **_kwargs: pytest.fail("sync must not use the global embedding provider"),
+        lambda *_args, **_kwargs: pytest.fail(
+            "sync must not use the global embedding provider"
+        ),
     )
     calls: list[tuple[str, str, int]] = []
 
@@ -572,7 +693,9 @@ def test_repository_sync_respects_global_embedding_contract(monkeypatch) -> None
         calls.append((provider, model, dimensions))
         return [_vector() for _text in texts]
 
-    monkeypatch.setattr("app.services.rag.indexing.embed_knowledge_texts", fake_embed)
+    monkeypatch.setattr(
+        "app.services.rag.indexing.embed_knowledge_texts", fake_embed
+    )
     db = _db_session()
     repo = _repo(db)
     db.add(
@@ -583,20 +706,40 @@ def test_repository_sync_respects_global_embedding_contract(monkeypatch) -> None
             embedding_dimensions=settings.embedding_dimensions,
         )
     )
-    db.add(Issue(repo_id=repo.id, number=5, title="Token expiry", body="Refresh once.", state="open"))
+    db.add(
+        Issue(
+            repo_id=repo.id,
+            number=5,
+            title="Token expiry",
+            body="Refresh once.",
+            state="open",
+        )
+    )
     db.flush()
 
     indexed = index_repository_documents(db, repo.id)
-    doc = db.query(Document).filter(Document.repo_id == repo.id, Document.source_type == "issue").one()
+    doc = (
+        db.query(Document)
+        .filter(Document.repo_id == repo.id, Document.source_type == "issue")
+        .one()
+    )
 
     assert indexed == 1
-    assert calls == [(settings.embedding_provider, settings.embedding_model, settings.embedding_dimensions)]
+    assert calls == [
+        (
+            settings.embedding_provider,
+            settings.embedding_model,
+            settings.embedding_dimensions,
+        )
+    ]
     assert not hasattr(doc, "embedding")
     assert doc.meta["embedding_provider"] == settings.embedding_provider
     assert len(store.upserts) == 1
 
 
-def test_failed_ci_logs_are_redacted_and_bounded_before_embedding(monkeypatch) -> None:
+def test_failed_ci_logs_are_redacted_and_bounded_before_embedding(
+    monkeypatch,
+) -> None:
     _install_fake_milvus(monkeypatch)
     monkeypatch.setattr(
         "app.services.rag.vector_store.embed_texts",
@@ -611,7 +754,8 @@ def test_failed_ci_logs_are_redacted_and_bounded_before_embedding(monkeypatch) -
             name="failing build",
             status="completed",
             conclusion="failure",
-            logs_text=f"Authorization: Bearer {secret}\nTOKEN={secret}\n" + ("failure context\n" * 1200),
+            logs_text=f"Authorization: Bearer {secret}\nTOKEN={secret}\n"
+            + ("failure context\n" * 1200),
         )
     )
     db.flush()
@@ -619,7 +763,9 @@ def test_failed_ci_logs_are_redacted_and_bounded_before_embedding(monkeypatch) -
     index_repository_documents(db, repo.id)
     docs = (
         db.query(Document)
-        .filter(Document.repo_id == repo.id, Document.source_type == "workflow_run")
+        .filter(
+            Document.repo_id == repo.id, Document.source_type == "workflow_run"
+        )
         .order_by(Document.title.asc())
         .all()
     )
@@ -627,7 +773,10 @@ def test_failed_ci_logs_are_redacted_and_bounded_before_embedding(monkeypatch) -
     assert len(docs) > 1
     assert all(secret not in doc.content for doc in docs)
     assert "[REDACTED" in "\n".join(doc.content for doc in docs)
-    assert all(len(doc.content) <= CI_LOG_CHUNK_CHARS + len("failing build") + 1 for doc in docs)
+    assert all(
+        len(doc.content) <= CI_LOG_CHUNK_CHARS + len("failing build") + 1
+        for doc in docs
+    )
     assert all(doc.meta["secrets_redacted"] is True for doc in docs)
 
 
@@ -649,7 +798,10 @@ def test_evidence_store_redacts_failed_ci_logs_before_chat_context() -> None:
     EvidenceStore(db).rebuild_repo(repo)
     evidence = (
         db.query(EvidenceItem)
-        .filter(EvidenceItem.repo_id == repo.id, EvidenceItem.source_type == "workflow_run")
+        .filter(
+            EvidenceItem.repo_id == repo.id,
+            EvidenceItem.source_type == "workflow_run",
+        )
         .one()
     )
 
@@ -658,7 +810,9 @@ def test_evidence_store_redacts_failed_ci_logs_before_chat_context() -> None:
     assert evidence.meta["secrets_redacted"] is True
 
 
-def test_context_assembler_prefetches_rag_evidence_before_chat_agent(monkeypatch) -> None:
+def test_context_assembler_prefetches_rag_evidence_before_chat_agent(
+    monkeypatch,
+) -> None:
     db = _db_session()
     repo = _repo(db)
     queries: list[str] = []
@@ -687,18 +841,28 @@ def test_context_assembler_prefetches_rag_evidence_before_chat_agent(monkeypatch
     assert queries == ["How should refresh retries work?"]
     assert assembled.evidence[0]["source_id"] == "doc-1"
     assert "[Related Evidence]" in assembled.system_context
-    assert "Refresh retries must use an idempotency key." in assembled.system_context
+    assert (
+        "Refresh retries must use an idempotency key."
+        in assembled.system_context
+    )
 
 
 def test_context_assembler_reports_exact_recent_history_coverage() -> None:
     db = _db_session()
     repo = _repo(db)
-    conversation = Conversation(repo_id=repo.id, title="Recall recent messages")
+    conversation = Conversation(
+        repo_id=repo.id, title="Recall recent messages"
+    )
     db.add(conversation)
     db.flush()
     db.add_all(
         [
-            ChatMessage(repo_id=repo.id, conversation_id=conversation.id, role="user", content="hi"),
+            ChatMessage(
+                repo_id=repo.id,
+                conversation_id=conversation.id,
+                role="user",
+                content="hi",
+            ),
             ChatMessage(
                 repo_id=repo.id,
                 conversation_id=conversation.id,
@@ -715,7 +879,9 @@ def test_context_assembler_reports_exact_recent_history_coverage() -> None:
     )
     db.flush()
 
-    assembled = ContextAssembler(db).assemble(repo, conversation, "我刚刚说了什么？")
+    assembled = ContextAssembler(db).assemble(
+        repo, conversation, "我刚刚说了什么？"
+    )
     coverage = assembled.compression_stats["history_coverage"]
 
     assert coverage["complete_and_exact"] is True
@@ -735,7 +901,9 @@ async def test_session_sealing_keeps_raw_memory_out_of_project_rag() -> None:
             return {
                 "summary": "Use short-lived access tokens.",
                 "facts": ["Tokens expire after fifteen minutes."],
-                "decisions": ["Refresh once before asking the user to sign in."],
+                "decisions": [
+                    "Refresh once before asking the user to sign in."
+                ],
                 "open_questions": [],
                 "tasks": [],
                 "user_preferences": [],
@@ -773,11 +941,25 @@ async def test_session_sealing_keeps_raw_memory_out_of_project_rag() -> None:
     )
     db.commit()
 
-    assert db.query(ChatSession).filter(ChatSession.conversation_id == conversation.id).count() == 1
-    assert db.query(ConversationMemory).filter(ConversationMemory.conversation_id == conversation.id).count() == 1
+    assert (
+        db.query(ChatSession)
+        .filter(ChatSession.conversation_id == conversation.id)
+        .count()
+        == 1
+    )
+    assert (
+        db.query(ConversationMemory)
+        .filter(ConversationMemory.conversation_id == conversation.id)
+        .count()
+        == 1
+    )
     assert (
         db.query(Document)
-        .filter(Document.source_type.in_(["chat_session", "conversation_memory", "thread_memory"]))
+        .filter(
+            Document.source_type.in_(
+                ["chat_session", "conversation_memory", "thread_memory"]
+            )
+        )
         .count()
         == 0
     )

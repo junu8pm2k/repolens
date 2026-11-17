@@ -5,7 +5,15 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -32,7 +40,10 @@ from app.schemas.rag import (
     RetrievalTestResponse,
 )
 from app.services.rag.document_extraction import MAX_DOCUMENT_BYTES
-from app.services.rag.document_processing import SUPPORTED_KNOWLEDGE_SUFFIXES, process_knowledge_document
+from app.services.rag.document_processing import (
+    SUPPORTED_KNOWLEDGE_SUFFIXES,
+    process_knowledge_document,
+)
 from app.services.rag.embeddings import validate_embedding_contract
 from app.services.rag.knowledge_base import (
     config_dict,
@@ -42,7 +53,12 @@ from app.services.rag.knowledge_base import (
     retrieve_knowledge,
     runtime_status,
 )
-from app.services.rag.qa import answer_question, build_sources, rag_status, reindex_documents
+from app.services.rag.qa import (
+    answer_question,
+    build_sources,
+    rag_status,
+    reindex_documents,
+)
 from app.services.rag.vector_store import delete_document_group
 
 router = APIRouter()
@@ -57,7 +73,10 @@ def _repo_or_404(db: Session, repo_id: uuid.UUID) -> Repository:
 
 def _safe_filename(filename: str) -> str:
     value = Path(filename or "upload.txt").name
-    return re.sub(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+", "_", value).strip("._") or "upload.txt"
+    return (
+        re.sub(r"[^a-zA-Z0-9._\-\u4e00-\u9fff]+", "_", value).strip("._")
+        or "upload.txt"
+    )
 
 
 def _upload_root(repo_id: uuid.UUID) -> Path:
@@ -74,7 +93,9 @@ def _validate_chunking(chunk_size: int, overlap: int) -> None:
         raise HTTPException(status_code=400, detail="切片重叠必须小于切片长度")
 
 
-def _document_response(item: KnowledgeSourceDocument) -> KnowledgeDocumentResponse:
+def _document_response(
+    item: KnowledgeSourceDocument,
+) -> KnowledgeDocumentResponse:
     return KnowledgeDocumentResponse(
         id=item.id,
         repo_id=item.repo_id,
@@ -95,11 +116,21 @@ def _document_response(item: KnowledgeSourceDocument) -> KnowledgeDocumentRespon
 def _knowledge_base(db: Session, repo: Repository) -> KnowledgeBaseResponse:
     config = get_or_create_config(db, repo.id)
     document_count, character_count = (
-        db.query(func.count(KnowledgeSourceDocument.id), func.coalesce(func.sum(KnowledgeSourceDocument.character_count), 0))
+        db.query(
+            func.count(KnowledgeSourceDocument.id),
+            func.coalesce(
+                func.sum(KnowledgeSourceDocument.character_count), 0
+            ),
+        )
         .filter(KnowledgeSourceDocument.repo_id == repo.id)
         .one()
     )
-    chunk_count = db.query(func.count(Document.id)).filter(Document.repo_id == repo.id).scalar() or 0
+    chunk_count = (
+        db.query(func.count(Document.id))
+        .filter(Document.repo_id == repo.id)
+        .scalar()
+        or 0
+    )
     return KnowledgeBaseResponse(
         id=repo.id,
         name=repo.name,
@@ -122,7 +153,9 @@ async def get_model_catalog() -> ModelCatalogResponse:
 
 
 @router.get("/repositories", response_model=list[KnowledgeBaseResponse])
-async def list_rag_repositories(db: Session = Depends(get_db)) -> list[KnowledgeBaseResponse]:
+async def list_rag_repositories(
+    db: Session = Depends(get_db),
+) -> list[KnowledgeBaseResponse]:
     repos = (
         db.query(Repository)
         .filter(Repository.provider != "knowledge_base")
@@ -133,11 +166,15 @@ async def list_rag_repositories(db: Session = Depends(get_db)) -> list[Knowledge
 
 
 @router.get("/repositories/{repo_id}", response_model=KnowledgeBaseResponse)
-async def get_rag_repository(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> KnowledgeBaseResponse:
+async def get_rag_repository(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> KnowledgeBaseResponse:
     return _knowledge_base(db, _repo_or_404(db, repo_id))
 
 
-@router.patch("/repositories/{repo_id}/config", response_model=KnowledgeBaseResponse)
+@router.patch(
+    "/repositories/{repo_id}/config", response_model=KnowledgeBaseResponse
+)
 async def update_rag_config(
     repo_id: uuid.UUID,
     payload: KnowledgeBaseConfigUpdate,
@@ -153,7 +190,11 @@ async def update_rag_config(
         validate_embedding_contract(
             str(changes.get("embedding_provider", config.embedding_provider)),
             str(changes.get("embedding_model", config.embedding_model)),
-            int(changes.get("embedding_dimensions", config.embedding_dimensions)),
+            int(
+                changes.get(
+                    "embedding_dimensions", config.embedding_dimensions
+                )
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -164,8 +205,13 @@ async def update_rag_config(
     return _knowledge_base(db, repo)
 
 
-@router.get("/repositories/{repo_id}/documents", response_model=list[KnowledgeDocumentResponse])
-async def list_documents(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> list[KnowledgeDocumentResponse]:
+@router.get(
+    "/repositories/{repo_id}/documents",
+    response_model=list[KnowledgeDocumentResponse],
+)
+async def list_documents(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> list[KnowledgeDocumentResponse]:
     _repo_or_404(db, repo_id)
     items = (
         db.query(KnowledgeSourceDocument)
@@ -176,7 +222,11 @@ async def list_documents(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> l
     return [_document_response(item) for item in items]
 
 
-@router.post("/repositories/{repo_id}/documents", response_model=KnowledgeDocumentResponse, status_code=202)
+@router.post(
+    "/repositories/{repo_id}/documents",
+    response_model=KnowledgeDocumentResponse,
+    status_code=202,
+)
 async def upload_document(
     repo_id: uuid.UUID,
     background_tasks: BackgroundTasks,
@@ -192,7 +242,9 @@ async def upload_document(
     filename = _safe_filename(file.filename or "upload.txt")
     suffix = Path(filename).suffix.lower()
     if suffix not in SUPPORTED_KNOWLEDGE_SUFFIXES:
-        raise HTTPException(status_code=415, detail=f"暂不支持 {suffix or '无扩展名'} 文件")
+        raise HTTPException(
+            status_code=415, detail=f"暂不支持 {suffix or '无扩展名'} 文件"
+        )
     checksum = hashlib.sha256(data).hexdigest()
     duplicate = (
         db.query(KnowledgeSourceDocument)
@@ -234,7 +286,10 @@ async def upload_document(
     return _document_response(document)
 
 
-@router.get("/repositories/{repo_id}/documents/{document_id}/chunks", response_model=list[KnowledgeChunkResponse])
+@router.get(
+    "/repositories/{repo_id}/documents/{document_id}/chunks",
+    response_model=list[KnowledgeChunkResponse],
+)
 async def list_document_chunks(
     repo_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -259,7 +314,10 @@ async def list_document_chunks(
     ]
 
 
-@router.post("/repositories/{repo_id}/documents/{document_id}/retry", response_model=KnowledgeDocumentResponse)
+@router.post(
+    "/repositories/{repo_id}/documents/{document_id}/retry",
+    response_model=KnowledgeDocumentResponse,
+)
 async def retry_document(
     repo_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -279,12 +337,16 @@ async def retry_document(
 
 
 @router.delete("/repositories/{repo_id}/documents/{document_id}")
-async def delete_document(repo_id: uuid.UUID, document_id: uuid.UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def delete_document(
+    repo_id: uuid.UUID, document_id: uuid.UUID, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     _repo_or_404(db, repo_id)
     source = db.get(KnowledgeSourceDocument, document_id)
     if source is None or source.repo_id != repo_id:
         raise HTTPException(status_code=404, detail="未找到文档")
-    delete_document_group(db, repo_id, document_id, source_type="knowledge_file", commit=False)
+    delete_document_group(
+        db, repo_id, document_id, source_type="knowledge_file", commit=False
+    )
     path = Path(source.stored_path)
     if path.exists() and path.is_file():
         path.unlink()
@@ -293,7 +355,10 @@ async def delete_document(repo_id: uuid.UUID, document_id: uuid.UUID, db: Sessio
     return {"id": str(document_id), "deleted": True}
 
 
-@router.post("/repositories/{repo_id}/retrieval-tests", response_model=RetrievalTestResponse)
+@router.post(
+    "/repositories/{repo_id}/retrieval-tests",
+    response_model=RetrievalTestResponse,
+)
 async def run_retrieval_test(
     repo_id: uuid.UUID,
     payload: RetrievalTestRequest,
@@ -312,7 +377,9 @@ async def run_retrieval_test(
         metadata_filters=payload.metadata_filters,
     )
     results = build_sources(items)
-    run = record_retrieval_test(db, repo_id, payload.query.strip(), trace, results, duration_ms)
+    run = record_retrieval_test(
+        db, repo_id, payload.query.strip(), trace, results, duration_ms
+    )
     return RetrievalTestResponse(
         id=run.id,
         query=run.query,
@@ -324,7 +391,10 @@ async def run_retrieval_test(
     )
 
 
-@router.get("/repositories/{repo_id}/retrieval-tests", response_model=list[RetrievalTestHistoryResponse])
+@router.get(
+    "/repositories/{repo_id}/retrieval-tests",
+    response_model=list[RetrievalTestHistoryResponse],
+)
 async def list_retrieval_tests(
     repo_id: uuid.UUID,
     limit: int = Query(default=20, ge=1, le=100),
@@ -351,14 +421,22 @@ async def list_retrieval_tests(
 
 
 @router.get("/{repo_id}/status")
-async def get_rag_status(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def get_rag_status(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> dict[str, Any]:
     _repo_or_404(db, repo_id)
     config = get_or_create_config(db, repo_id)
-    return {**rag_status(db, repo_id), "config": config_dict(config), "runtime": runtime_status(config)}
+    return {
+        **rag_status(db, repo_id),
+        "config": config_dict(config),
+        "runtime": runtime_status(config),
+    }
 
 
 @router.post("/{repo_id}/search", response_model=RAGSearchResponse)
-async def search_rag(repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = Depends(get_db)) -> RAGSearchResponse:
+async def search_rag(
+    repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = Depends(get_db)
+) -> RAGSearchResponse:
     _repo_or_404(db, repo_id)
     items, trace, duration_ms = await retrieve_knowledge(
         db,
@@ -379,7 +457,9 @@ async def search_rag(repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session =
 
 
 @router.post("/{repo_id}/ask", response_model=RAGAnswerResponse)
-async def ask_rag(repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = Depends(get_db)) -> RAGAnswerResponse:
+async def ask_rag(
+    repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = Depends(get_db)
+) -> RAGAnswerResponse:
     _repo_or_404(db, repo_id)
     result = await answer_question(
         db,
@@ -393,7 +473,9 @@ async def ask_rag(repo_id: uuid.UUID, payload: RAGQueryRequest, db: Session = De
 
 
 @router.post("/{repo_id}/reindex", response_model=RAGReindexResponse)
-def reindex_rag(repo_id: uuid.UUID, db: Session = Depends(get_db)) -> RAGReindexResponse:
+def reindex_rag(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> RAGReindexResponse:
     _repo_or_404(db, repo_id)
     config = get_or_create_config(db, repo_id)
     count = reindex_documents(db, repo_id)

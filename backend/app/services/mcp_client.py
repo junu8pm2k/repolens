@@ -16,19 +16,28 @@ class McpClientError(RuntimeError):
 
 
 def _supports_asyncio_subprocess() -> bool:
-    """asyncio 子进程在 Windows 上只被 ProactorEventLoop 支持。
+    """asyncio 子进程在 Windows 上只被
+    ProactorEventLoop 支持。
 
-    uvicorn 的 ``--reload`` 在 Windows 上会切换到 ``WindowsSelectorEventLoopPolicy``，
-    此时 ``asyncio.create_subprocess_exec`` 会抛 ``NotImplementedError``。
+    uvicorn 的 ``--reload`` 在 Windows
+    上会切换到
+    ``WindowsSelectorEventLoopPolicy``，
+    此时
+    ``asyncio.create_subprocess_exec``
+    会抛 ``NotImplementedError``。
     """
     if sys.platform != "win32":
         return True
     proactor_loop = getattr(asyncio, "ProactorEventLoop", None)
-    return proactor_loop is not None and isinstance(asyncio.get_running_loop(), proactor_loop)
+    return proactor_loop is not None and isinstance(
+        asyncio.get_running_loop(), proactor_loop
+    )
 
 
 class _ThreadedStdioProcess:
-    """同步管道 + 线程的兜底进程包装，用于无法使用 asyncio 子进程的事件循环。"""
+    """同步管道 + 线程的兜底进程包装，用于无法使用 asyncio
+    子进程的事件循环。
+    """
 
     def __init__(self, process: subprocess.Popen[bytes]) -> None:
         self._process = process
@@ -57,36 +66,56 @@ class _ThreadedStdioProcess:
         if self._process.poll() is None:
             self._process.kill()
         self._process.wait()
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
+        for stream in (
+            self._process.stdin,
+            self._process.stdout,
+            self._process.stderr,
+        ):
             if stream is not None:
                 stream.close()
 
 
 class StdioMcpClient:
-    def __init__(self, command: str | None = None, args: list[str] | None = None, cwd: str | None = None) -> None:
+    def __init__(
+        self,
+        command: str | None = None,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+    ) -> None:
         backend_root = Path(__file__).resolve().parents[2]
         self.command = command or sys.executable
-        self.args = args or [str(backend_root / "app" / "mcp" / "memory_server.py")]
+        self.args = args or [
+            str(backend_root / "app" / "mcp" / "memory_server.py")
+        ]
         self.cwd = cwd or str(backend_root)
         self._next_id = 1
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call_tool(
+        self, name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         process = await self._start()
         try:
             await self._initialize(process)
             await self._notify(process, "notifications/initialized", {})
-            return await self._request(process, "tools/call", {"name": name, "arguments": arguments})
+            return await self._request(
+                process, "tools/call", {"name": name, "arguments": arguments}
+            )
         finally:
             await self._stop(process)
 
     async def inspect_server(self) -> dict[str, Any]:
-        """Perform a real MCP handshake and return the server's advertised tools."""
+        """Perform a real MCP handshake and return the server's
+        advertised tools.
+        """
         process = await self._start()
         try:
             initialize = await self._initialize(process)
             await self._notify(process, "notifications/initialized", {})
             tools = await self._request(process, "tools/list", {})
-            return {"initialize": initialize, "tools": tools.get("tools") or []}
+            return {
+                "initialize": initialize,
+                "tools": tools.get("tools") or [],
+            }
         finally:
             await self._stop(process)
 
@@ -97,7 +126,10 @@ class StdioMcpClient:
             {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "repolens-web-agent", "version": "0.1.0"},
+                "clientInfo": {
+                    "name": "repolens-web-agent",
+                    "version": "0.1.0",
+                },
             },
         )
 
@@ -127,13 +159,27 @@ class StdioMcpClient:
             )
         )
 
-    async def _notify(self, process: Any, method: str, params: dict[str, Any]) -> None:
-        await self._write(process, {"jsonrpc": "2.0", "method": method, "params": params})
+    async def _notify(
+        self, process: Any, method: str, params: dict[str, Any]
+    ) -> None:
+        await self._write(
+            process, {"jsonrpc": "2.0", "method": method, "params": params}
+        )
 
-    async def _request(self, process: Any, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _request(
+        self, process: Any, method: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
         request_id = self._next_id
         self._next_id += 1
-        await self._write(process, {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
+        await self._write(
+            process,
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            },
+        )
         try:
             line = await asyncio.wait_for(self._readline(process), timeout=30)
         except TimeoutError as exc:
@@ -141,14 +187,18 @@ class StdioMcpClient:
         if not line:
             stderr = ""
             try:
-                stderr = await asyncio.wait_for(self._read_stderr(process), timeout=5)
+                stderr = await asyncio.wait_for(
+                    self._read_stderr(process), timeout=5
+                )
             except TimeoutError:
                 stderr = ""
             raise McpClientError(f"MCP server closed stdout. {stderr}")
         try:
             response = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise McpClientError(f"MCP server returned an invalid JSON response for {method}") from exc
+            raise McpClientError(
+                f"MCP server returned an invalid JSON response for {method}"
+            ) from exc
         if "error" in response:
             error = response["error"]
             raise McpClientError(str(error.get("message") or error))

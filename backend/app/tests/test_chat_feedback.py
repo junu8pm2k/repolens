@@ -8,7 +8,15 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
 from app.api.routes import feedback as feedback_routes
-from app.db.models import AgentRun, Base, ChatFeedback, ChatMessage, ChatSession, Conversation, Repository
+from app.db.models import (
+    AgentRun,
+    Base,
+    ChatFeedback,
+    ChatMessage,
+    ChatSession,
+    Conversation,
+    Repository,
+)
 from app.schemas.feedback import ChatFeedbackCreate, ChatFeedbackReview
 
 
@@ -19,7 +27,11 @@ def _db_session():
 
 
 def _feedback_fixture(db):
-    repo = Repository(owner="repolens", name="demo", full_name=f"repolens/demo-{uuid.uuid4().hex[:8]}")
+    repo = Repository(
+        owner="repolens",
+        name="demo",
+        full_name=f"repolens/demo-{uuid.uuid4().hex[:8]}",
+    )
     db.add(repo)
     db.flush()
     conversation = Conversation(repo_id=repo.id, title="反馈测试")
@@ -39,7 +51,10 @@ def _feedback_fixture(db):
         content="CI 是因为测试失败。",
         route="ci_debug",
         tool_calls=[{"tool_name": "ci_debug", "status": "success"}],
-        meta={"run_id": str(run_id), "agent_events": [{"type": "tool_use", "tool_name": "ci_debug"}]},
+        meta={
+            "run_id": str(run_id),
+            "agent_events": [{"type": "tool_use", "tool_name": "ci_debug"}],
+        },
     )
     db.add_all([user_message, assistant_message])
     db.flush()
@@ -63,8 +78,12 @@ def _feedback_fixture(db):
             assistant_message_id=assistant_message.id,
             route="ci_debug",
             transcript_json={
-                "agent_events": [{"type": "tool_use", "tool_name": "ci_debug"}],
-                "tool_use_results": [{"type": "tool_result", "status": "success"}],
+                "agent_events": [
+                    {"type": "tool_use", "tool_name": "ci_debug"}
+                ],
+                "tool_use_results": [
+                    {"type": "tool_result", "status": "success"}
+                ],
                 "memory_update": {"facts": ["CI failed"]},
             },
             digest="排查 CI 失败",
@@ -85,7 +104,11 @@ async def test_negative_feedback_persists_notifies_and_traces(monkeypatch):
         notifications.append(kwargs)
         return "sent", None
 
-    monkeypatch.setattr(feedback_routes, "send_negative_feedback_notification", fake_notification)
+    monkeypatch.setattr(
+        feedback_routes,
+        "send_negative_feedback_notification",
+        fake_notification,
+    )
     result = await feedback_routes.create_feedback(
         ChatFeedbackCreate(
             repo_id=repo.id,
@@ -117,7 +140,9 @@ async def test_negative_feedback_persists_notifies_and_traces(monkeypatch):
 
     reviewed = await feedback_routes.review_feedback(
         result.id,
-        ChatFeedbackReview(review_status="resolved", review_note="已修复 Prompt"),
+        ChatFeedbackReview(
+            review_status="resolved", review_note="已修复 Prompt"
+        ),
         db,
     )
     assert reviewed.review_status == "resolved"
@@ -134,7 +159,11 @@ async def test_feedback_is_idempotent_per_assistant_message(monkeypatch):
         notifications.append(kwargs)
         return "sent", None
 
-    monkeypatch.setattr(feedback_routes, "send_negative_feedback_notification", fake_notification)
+    monkeypatch.setattr(
+        feedback_routes,
+        "send_negative_feedback_notification",
+        fake_notification,
+    )
     payload = ChatFeedbackCreate(
         repo_id=repo.id,
         conversation_id=conversation.id,

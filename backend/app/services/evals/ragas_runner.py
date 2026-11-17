@@ -17,12 +17,18 @@ from typing import Any, Protocol
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import Conversation, Document, Issue, PullRequest, Repository, WorkflowRun
+from app.db.models import (
+    Conversation,
+    Document,
+    Issue,
+    PullRequest,
+    Repository,
+    WorkflowRun,
+)
 from app.services.agents.chat_agent import ChatAgent
 from app.services.chat_memory import ContextAssembler, EvidenceStore
 from app.services.rag.embeddings import embed_text
 from app.services.rag.source_policy import RAG_SOURCE_TYPES
-
 
 CORE_RAGAS_METRICS = (
     "context_precision",
@@ -38,28 +44,41 @@ AGENT_RAGAS_METRICS = (
 )
 NO_ANSWER_SKIP_REASON = "no_answer_uses_hard_rules"
 _REFUSAL_PATTERN = re.compile(
-    r"无法(?:确定|确认|回答|得知|判断|提供)|(?:没有|未找到|未检索到).{0,25}(?:资料|证据|信息)"
-    r"|(?:资料|证据|信息)不足|(?:cannot|can't|unable to) (?:answer|determine|confirm)|not enough (?:evidence|information)",
+    (
+        "无法(?:确定|确认|回答|得知|判断|提供)|(?:没有|未找到|未检索到).{0"
+        ",25}(?:资料|证据|信息)|(?:资料|证据|信息)不足|(?:cannot|can't|"
+        "unable to) (?:answer|determine|confirm)|not enough (?:evidence|"
+        "information)"
+    ),
     re.IGNORECASE,
 )
 
 _FAITHFULNESS_CHUNK_CHARS = 700
 
 
-def _split_faithfulness_response(text: str, max_chars: int = _FAITHFULNESS_CHUNK_CHARS) -> list[str]:
-    """Split a long answer without dropping content before native Ragas scoring.
+def _split_faithfulness_response(
+    text: str, max_chars: int = _FAITHFULNESS_CHUNK_CHARS
+) -> list[str]:
+    """Split a long answer without dropping content before native Ragas
+    scoring.
 
-    Faithfulness first asks the judge to extract all claims. Some OpenAI-compatible
-    reasoning models can exhaust their structured-output budget even for a moderate
-    answer. Scoring smaller semantic chunks keeps that native metric reliable; the
-    final score is weighted by the amount of answer text in each chunk.
+    Faithfulness first asks the judge to extract all claims. Some
+    OpenAI-compatible reasoning models can exhaust their
+    structured-output budget even for a moderate answer. Scoring
+    smaller semantic chunks keeps that native metric reliable; the
+    final score is weighted by the amount of answer text in each
+    chunk.
     """
 
     normalized = text.strip()
     if not normalized:
         return [""]
 
-    units = [unit.strip() for unit in re.split(r"(?<=[。！？.!?])\s+|\n+", normalized) if unit.strip()]
+    units = [
+        unit.strip()
+        for unit in re.split(r"(?<=[。！？.!?])\s+|\n+", normalized)
+        if unit.strip()
+    ]
     chunks: list[str] = []
     current = ""
     for unit in units:
@@ -123,7 +142,9 @@ class SemanticScorer(Protocol):
 ProgressCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
-async def _emit_progress(callback: ProgressCallback | None, **payload: Any) -> None:
+async def _emit_progress(
+    callback: ProgressCallback | None, **payload: Any
+) -> None:
     if callback is None:
         return
     pending = callback(payload)
@@ -134,9 +155,10 @@ async def _emit_progress(callback: ProgressCallback | None, **payload: Any) -> N
 def _ensure_ragas_compatibility() -> None:
     """Bridge a Ragas 0.4.3 import removed by langchain-community 0.4.
 
-    Ragas imports the legacy ChatVertexAI module only for an isinstance check. The
-    project does not use VertexAI, so a scoped placeholder keeps the supported
-    Collections API usable without downgrading LangChain/LangGraph.
+    Ragas imports the legacy ChatVertexAI module only for an
+    isinstance check. The project does not use VertexAI, so a scoped
+    placeholder keeps the supported Collections API usable without
+    downgrading LangChain/LangGraph.
     """
 
     module_name = "langchain_community.chat_models.vertexai"
@@ -159,7 +181,9 @@ def _ensure_ragas_compatibility() -> None:
 
 
 class RagasCollectionsScorer:
-    """Adapter from RepoLens's model clients to the Ragas 0.4 Collections API."""
+    """Adapter from RepoLens's model clients to the Ragas 0.4
+    Collections API.
+    """
 
     def __init__(self) -> None:
         _ensure_ragas_compatibility()
@@ -176,8 +200,12 @@ class RagasCollectionsScorer:
                 ToolCallAccuracy,
                 ToolCallF1,
             )
-        except Exception as exc:  # pragma: no cover - depends on optional packages
-            raise RagasUnavailableError(f"Unable to import Ragas 0.4 Collections API: {exc}") from exc
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - depends on optional packages
+            raise RagasUnavailableError(
+                f"Unable to import Ragas 0.4 Collections API: {exc}"
+            ) from exc
 
         class ProjectEmbedding(BaseRagasEmbedding):
             def embed_text(self, text: str, **_: Any) -> list[float]:
@@ -187,15 +215,25 @@ class RagasCollectionsScorer:
                 return await asyncio.to_thread(embed_text, text)
 
         api_key = settings.ragas_judge_api_key or settings.llm_api_key
-        base_url = (settings.ragas_judge_base_url or settings.llm_base_url).rstrip("/")
+        base_url = (
+            settings.ragas_judge_base_url or settings.llm_base_url
+        ).rstrip("/")
         model = settings.ragas_judge_model or settings.llm_model
         if not api_key:
-            raise RagasUnavailableError("RAGAS judge API key is not configured")
+            raise RagasUnavailableError(
+                "RAGAS judge API key is not configured"
+            )
         if not base_url or not model:
-            raise RagasUnavailableError("RAGAS judge base URL or model is not configured")
+            raise RagasUnavailableError(
+                "RAGAS judge base URL or model is not configured"
+            )
 
         try:
-            client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=settings.ragas_timeout_seconds)
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=settings.ragas_timeout_seconds,
+            )
             llm = llm_factory(
                 model,
                 client=client,
@@ -210,7 +248,9 @@ class RagasCollectionsScorer:
                 "answer_relevancy": AnswerRelevancy(
                     llm=llm,
                     embeddings=embedding,
-                    strictness=max(1, settings.ragas_answer_relevancy_strictness),
+                    strictness=max(
+                        1, settings.ragas_answer_relevancy_strictness
+                    ),
                 ),
                 "agent_goal_accuracy": AgentGoalAccuracyWithReference(llm=llm),
                 "tool_call_accuracy": ToolCallAccuracy(strict_order=False),
@@ -220,11 +260,18 @@ class RagasCollectionsScorer:
             self.version = importlib.metadata.version("ragas")
             self.judge_model = model
         except Exception as exc:
-            raise RagasUnavailableError(f"Unable to initialize Ragas judge: {exc}") from exc
+            raise RagasUnavailableError(
+                f"Unable to initialize Ragas judge: {exc}"
+            ) from exc
 
     @staticmethod
     def _message_types() -> tuple[Any, Any, Any, Any]:
-        from ragas.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+        from ragas.messages import (
+            AIMessage,
+            HumanMessage,
+            ToolCall,
+            ToolMessage,
+        )
 
         return HumanMessage, AIMessage, ToolMessage, ToolCall
 
@@ -239,7 +286,9 @@ class RagasCollectionsScorer:
         messages: list[Any] = [HumanMessage(content=user_input)]
         ragas_calls = [
             ToolCall(
-                name=str(item.get("tool_name") or item.get("name") or "unknown"),
+                name=str(
+                    item.get("tool_name") or item.get("name") or "unknown"
+                ),
                 args=dict(item.get("arguments") or item.get("args") or {}),
             )
             for item in tool_calls
@@ -249,8 +298,14 @@ class RagasCollectionsScorer:
             messages.append(AIMessage(content="", tool_calls=ragas_calls))
         for item in tool_observations:
             if isinstance(item, dict):
-                visible_content = item.get("visible_content") if "visible_content" in item else item.get("content")
-                messages.append(ToolMessage(content=str(visible_content or "")))
+                visible_content = (
+                    item.get("visible_content")
+                    if "visible_content" in item
+                    else item.get("content")
+                )
+                messages.append(
+                    ToolMessage(content=str(visible_content or ""))
+                )
         messages.append(AIMessage(content=response))
         return messages
 
@@ -275,17 +330,26 @@ class RagasCollectionsScorer:
                     timeout=settings.ragas_timeout_seconds,
                 )
 
-        results = await asyncio.gather(*(score_chunk(chunk) for chunk in chunks), return_exceptions=True)
-        failures = [result for result in results if isinstance(result, BaseException)]
+        results = await asyncio.gather(
+            *(score_chunk(chunk) for chunk in chunks), return_exceptions=True
+        )
+        failures = [
+            result for result in results if isinstance(result, BaseException)
+        ]
         if failures:
             first = failures[0]
             raise RagasUnavailableError(
-                f"Faithfulness chunk scoring failed ({len(failures)}/{len(chunks)}): "
-                f"{type(first).__name__}: {first}"
+                (
+                    f"Faithfulness chunk scoring failed ({len(failures)}/"
+                    f"{len(chunks)}): {type(first).__name__}: {first}"
+                )
             ) from first
 
         weights = [max(1, len(chunk)) for chunk in chunks]
-        return sum(float(result.value) * weight for result, weight in zip(results, weights, strict=True)) / sum(weights)
+        return sum(
+            float(result.value) * weight
+            for result, weight in zip(results, weights, strict=True)
+        ) / sum(weights)
 
     async def score(
         self,
@@ -299,11 +363,18 @@ class RagasCollectionsScorer:
         expected_tool_calls: list[dict[str, Any]],
         metric_names: set[str] | None = None,
     ) -> tuple[dict[str, float], dict[str, str]]:
-        messages = self._messages(user_input, response, tool_calls, tool_observations)
-        wants = lambda name: metric_names is None or name in metric_names
+        messages = self._messages(
+            user_input, response, tool_calls, tool_observations
+        )
+
+        def wants(name):
+            return metric_names is None or name in metric_names
+
         calls: dict[str, Any] = {}
         if wants("context_precision"):
-            calls["context_precision"] = self.metrics["context_precision"].ascore(
+            calls["context_precision"] = self.metrics[
+                "context_precision"
+            ].ascore(
                 user_input=user_input,
                 reference=reference,
                 retrieved_contexts=retrieved_contexts,
@@ -321,26 +392,36 @@ class RagasCollectionsScorer:
                 retrieved_contexts=retrieved_contexts,
             )
         if wants("answer_relevancy"):
-            calls["answer_relevancy"] = self.metrics["answer_relevancy"].ascore(
+            calls["answer_relevancy"] = self.metrics[
+                "answer_relevancy"
+            ].ascore(
                 user_input=user_input,
                 response=response,
             )
         if wants("agent_goal_accuracy"):
-            calls["agent_goal_accuracy"] = self.metrics["agent_goal_accuracy"].ascore(
+            calls["agent_goal_accuracy"] = self.metrics[
+                "agent_goal_accuracy"
+            ].ascore(
                 user_input=messages,
                 reference=reference,
             )
-        if expected_tool_calls and (wants("tool_call_accuracy") or wants("tool_call_f1")):
+        if expected_tool_calls and (
+            wants("tool_call_accuracy") or wants("tool_call_f1")
+        ):
             _, _, _, ToolCall = self.message_types
             reference_calls = [
                 ToolCall(
-                    name=str(item.get("tool_name") or item.get("name") or "unknown"),
+                    name=str(
+                        item.get("tool_name") or item.get("name") or "unknown"
+                    ),
                     args=dict(item.get("arguments") or item.get("args") or {}),
                 )
                 for item in expected_tool_calls
             ]
             if wants("tool_call_accuracy"):
-                calls["tool_call_accuracy"] = self.metrics["tool_call_accuracy"].ascore(
+                calls["tool_call_accuracy"] = self.metrics[
+                    "tool_call_accuracy"
+                ].ascore(
                     user_input=messages,
                     reference_tool_calls=reference_calls,
                 )
@@ -353,7 +434,9 @@ class RagasCollectionsScorer:
         names = list(calls)
         results = await asyncio.gather(
             *(
-                asyncio.wait_for(calls[name], timeout=settings.ragas_timeout_seconds)
+                asyncio.wait_for(
+                    calls[name], timeout=settings.ragas_timeout_seconds
+                )
                 for name in names
             ),
             return_exceptions=True,
@@ -364,17 +447,24 @@ class RagasCollectionsScorer:
             if isinstance(result, BaseException):
                 errors[name] = f"{type(result).__name__}: {result}"
                 continue
-            value = result if isinstance(result, (int, float)) else result.value
+            value = (
+                result if isinstance(result, (int, float)) else result.value
+            )
             scores[name] = round(float(value), 4)
         return scores, errors
 
 
-def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[RagEvalCase]:
+def _default_cases(
+    db: Session, repo_id: str, limit: int | None = None
+) -> list[RagEvalCase]:
     repo_uuid = uuid.UUID(str(repo_id))
     case_limit = limit or settings.ragas_max_cases
     docs = (
         db.query(Document)
-        .filter(Document.repo_id == repo_uuid, Document.source_type.in_(RAG_SOURCE_TYPES))
+        .filter(
+            Document.repo_id == repo_uuid,
+            Document.source_type.in_(RAG_SOURCE_TYPES),
+        )
         .order_by(Document.created_at.desc())
         .limit(case_limit)
         .all()
@@ -391,7 +481,11 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
             question = (
                 f"请概括项目资料《{doc.title}》这一章节记录的关键事实，给出来源引用，只回答该章节相关内容。"
                 if re.search(r"[\u4e00-\u9fff]", doc.title)
-                else f'Summarize the recorded facts in project knowledge section "{doc.title}" and cite the sources. Focus on that section.'
+                else (
+                    f"Summarize the recorded facts in project knowledge "
+                    f'section "{doc.title}" and cite the sources. Focus on '
+                    f"that section."
+                )
             )
         cases.append(
             RagEvalCase(
@@ -405,9 +499,12 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
     if cases:
         return cases
 
-    # A freshly connected repository can have structured Issue/PR/CI data before
-    # the reusable Document index is populated. Production ChatAgent prefetches
-    # those records through EvidenceStore, so the default suite must cover them.
+    # A freshly connected repository can have structured
+    # Issue/PR/CI data before
+    # the reusable Document index is populated. Production
+    # ChatAgent prefetches
+    # those records through EvidenceStore, so the default suite
+    # must cover them.
     issues = (
         db.query(Issue)
         .filter(Issue.repo_id == repo_uuid)
@@ -429,7 +526,10 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
         cases.append(
             RagEvalCase(
                 id=f"issue-{issue.number}",
-                question=f"What project context is recorded for issue #{issue.number}: {issue.title}?",
+                question=(
+                    f"What project context is recorded for issue #"
+                    f"{issue.number}: {issue.title}?"
+                ),
                 reference=reference[:2000],
                 expected_source_ids=[str(issue.id)],
                 source_type="issue",
@@ -460,7 +560,10 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
         cases.append(
             RagEvalCase(
                 id=f"pull-request-{pull_request.number}",
-                question=f"What changed in pull request #{pull_request.number}: {pull_request.title}?",
+                question=(
+                    f"What changed in pull request #{pull_request.number}: "
+                    f"{pull_request.title}?"
+                ),
                 reference=reference[:2000],
                 expected_source_ids=[str(pull_request.id)],
                 source_type="pull_request",
@@ -471,7 +574,10 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
 
     workflow_runs = (
         db.query(WorkflowRun)
-        .filter(WorkflowRun.repo_id == repo_uuid, WorkflowRun.conclusion == "failure")
+        .filter(
+            WorkflowRun.repo_id == repo_uuid,
+            WorkflowRun.conclusion == "failure",
+        )
         .order_by(WorkflowRun.created_at.desc())
         .limit(case_limit - len(cases))
         .all()
@@ -490,7 +596,9 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
         cases.append(
             RagEvalCase(
                 id=f"workflow-run-{workflow_run.github_run_id}",
-                question=f"What does the failed CI run {workflow_run.name} show?",
+                question=(
+                    f"What does the failed CI run {workflow_run.name} show?"
+                ),
                 reference=reference[:2000],
                 expected_source_ids=[str(workflow_run.id)],
                 source_type="workflow_run",
@@ -500,14 +608,19 @@ def _default_cases(db: Session, repo_id: str, limit: int | None = None) -> list[
 
 
 def _source_hit(result: dict[str, Any], expected_source_ids: set[str]) -> bool:
-    return str(result.get("id")) in expected_source_ids or str(result.get("source_id")) in expected_source_ids
+    return (
+        str(result.get("id")) in expected_source_ids
+        or str(result.get("source_id")) in expected_source_ids
+    )
 
 
 def _dcg(hits: list[int]) -> float:
     return sum(hit / math.log2(index + 2) for index, hit in enumerate(hits))
 
 
-def _retrieval_metrics(cases: list[RagEvalCase], rows: list[dict[str, Any]], k: int) -> dict[str, float]:
+def _retrieval_metrics(
+    cases: list[RagEvalCase], rows: list[dict[str, Any]], k: int
+) -> dict[str, float]:
     recall_values: list[float] = []
     precision_values: list[float] = []
     reciprocal_ranks: list[float] = []
@@ -518,11 +631,21 @@ def _retrieval_metrics(cases: list[RagEvalCase], rows: list[dict[str, Any]], k: 
         expected = set(case.expected_source_ids)
         results = row["results"][:k]
         if case.expected_source_groups:
-            groups = {name: set(ids) for name, ids in case.expected_source_groups.items()}
+            groups = {
+                name: set(ids)
+                for name, ids in case.expected_source_groups.items()
+            }
             matched: set[str] = set()
             hits = []
             for result in results:
-                name = next((name for name, ids in groups.items() if _source_hit(result, ids)), None)
+                name = next(
+                    (
+                        name
+                        for name, ids in groups.items()
+                        if _source_hit(result, ids)
+                    ),
+                    None,
+                )
                 hits.append(int(name is not None and name not in matched))
                 if name is not None:
                     matched.add(name)
@@ -533,21 +656,36 @@ def _retrieval_metrics(cases: list[RagEvalCase], rows: list[dict[str, Any]], k: 
             recall_values.append(float(not expected or any(hits)))
             ideal = sorted(hits, reverse=True)
         precision_values.append(sum(hits) / max(len(results), 1))
-        first_hit = next((index + 1 for index, hit in enumerate(hits) if hit), None)
+        first_hit = next(
+            (index + 1 for index, hit in enumerate(hits) if hit), None
+        )
         has_expected_sources = bool(expected or case.expected_source_groups)
-        reciprocal_ranks.append(1.0 / first_hit if first_hit else float(not has_expected_sources))
-        ndcg_values.append(_dcg(hits) / (_dcg(ideal) or 1.0) if has_expected_sources else 1.0)
+        reciprocal_ranks.append(
+            1.0 / first_hit if first_hit else float(not has_expected_sources)
+        )
+        ndcg_values.append(
+            _dcg(hits) / (_dcg(ideal) or 1.0) if has_expected_sources else 1.0
+        )
     if not recall_values:
-        return {"recall_at_k": 0.0, "precision_at_k": 0.0, "mrr": 0.0, "ndcg": 0.0}
+        return {
+            "recall_at_k": 0.0,
+            "precision_at_k": 0.0,
+            "mrr": 0.0,
+            "ndcg": 0.0,
+        }
     return {
         "recall_at_k": round(sum(recall_values) / len(recall_values), 4),
-        "precision_at_k": round(sum(precision_values) / len(precision_values), 4),
+        "precision_at_k": round(
+            sum(precision_values) / len(precision_values), 4
+        ),
         "mrr": round(sum(reciprocal_ranks) / len(reciprocal_ranks), 4),
         "ndcg": round(sum(ndcg_values) / len(ndcg_values), 4),
     }
 
 
-def _trace_rows(trace: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
+def _trace_rows(
+    trace: dict[str, Any],
+) -> tuple[list[str], list[dict[str, Any]]]:
     contexts: list[str] = []
     sources: list[dict[str, Any]] = []
     seen_contexts: set[str] = set()
@@ -585,20 +723,41 @@ def _contains_fact(normalized_answer: str, value: str) -> bool:
         return False
     prefix = r"(?<!\d)(?<!\d\.)" if fact[0].isdigit() else ""
     suffix = r"(?!\d|\.\d)" if fact[-1].isdigit() else ""
-    return re.search(prefix + re.escape(fact) + suffix, normalized_answer) is not None
+    return (
+        re.search(prefix + re.escape(fact) + suffix, normalized_answer)
+        is not None
+    )
 
 
-def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[str, Any]], contexts: list[str]) -> dict[str, Any]:
-    groups = {name: set(ids) for name, ids in case.expected_source_groups.items()}
-    missing_sources = [name for name, ids in groups.items() if not any(_source_hit(item, ids) for item in sources)]
+def _hard_rules(
+    case: RagEvalCase,
+    result: dict[str, Any],
+    sources: list[dict[str, Any]],
+    contexts: list[str],
+) -> dict[str, Any]:
+    groups = {
+        name: set(ids) for name, ids in case.expected_source_groups.items()
+    }
+    missing_sources = [
+        name
+        for name, ids in groups.items()
+        if not any(_source_hit(item, ids) for item in sources)
+    ]
     expected = set(case.expected_source_ids)
-    source_hit = not missing_sources if groups else not expected or any(_source_hit(item, expected) for item in sources)
+    source_hit = (
+        not missing_sources
+        if groups
+        else not expected
+        or any(_source_hit(item, expected) for item in sources)
+    )
     actual_tools = [
         str(item.get("tool_name") or "")
         for item in result.get("tool_calls") or []
         if isinstance(item, dict)
     ]
-    missing_tools = [name for name in case.required_tools if name not in actual_tools]
+    missing_tools = [
+        name for name in case.required_tools if name not in actual_tools
+    ]
     tool_errors = [
         {
             "tool_name": item.get("tool_name"),
@@ -609,16 +768,38 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
     ]
     answer = str(result.get("answer") or "").strip()
     answer_present = bool(answer)
-    completion_status = str((result.get("completion") or {}).get("status") or "")
-    completion_passed = not completion_status or completion_status in {"completed", "completed_with_tool_errors"}
+    completion_status = str(
+        (result.get("completion") or {}).get("status") or ""
+    )
+    completion_passed = not completion_status or completion_status in {
+        "completed",
+        "completed_with_tool_errors",
+    }
     contexts_present = bool(contexts)
     contexts_required = case.kind != "no_answer"
-    refusal_matched = None if contexts_required else bool(_REFUSAL_PATTERN.search(answer))
+    refusal_matched = (
+        None if contexts_required else bool(_REFUSAL_PATTERN.search(answer))
+    )
     normalized_answer = _normalize_fact(answer)
-    missing_phrases = [value for value in case.must_include if not _contains_fact(normalized_answer, value)]
-    forbidden_phrases = [value for value in case.must_not_include if _contains_fact(normalized_answer, value)]
-    missing_conflict_values = [value for value in case.conflict_values if not _contains_fact(normalized_answer, value)]
-    answer_pattern_matched = case.answer_regex is None or re.fullmatch(case.answer_regex, answer) is not None
+    missing_phrases = [
+        value
+        for value in case.must_include
+        if not _contains_fact(normalized_answer, value)
+    ]
+    forbidden_phrases = [
+        value
+        for value in case.must_not_include
+        if _contains_fact(normalized_answer, value)
+    ]
+    missing_conflict_values = [
+        value
+        for value in case.conflict_values
+        if not _contains_fact(normalized_answer, value)
+    ]
+    answer_pattern_matched = (
+        case.answer_regex is None
+        or re.fullmatch(case.answer_regex, answer) is not None
+    )
     passed = (
         source_hit
         and not missing_tools
@@ -652,8 +833,12 @@ def _hard_rules(case: RagEvalCase, result: dict[str, Any], sources: list[dict[st
     }
 
 
-def _evaluation_project_context(db: Session, repo_id: uuid.UUID) -> dict[str, Any]:
-    """Load the same project-owned context that the frontend sends to ChatAgent."""
+def _evaluation_project_context(
+    db: Session, repo_id: uuid.UUID
+) -> dict[str, Any]:
+    """Load the same project-owned context that the frontend sends to
+    ChatAgent.
+    """
 
     documents = (
         db.query(Document)
@@ -671,14 +856,23 @@ def _evaluation_project_context(db: Session, repo_id: uuid.UUID) -> dict[str, An
         if document.source_type == "team_member":
             team_members.append(
                 {
-                    "name": str(metadata.get("name") or document.title.replace("团队成员：", "")),
+                    "name": str(
+                        metadata.get("name")
+                        or document.title.replace("团队成员：", "")
+                    ),
                     "role": str(metadata.get("role") or ""),
                     "strengths": str(metadata.get("strengths") or ""),
-                    "techStack": str(metadata.get("tech_stack") or metadata.get("techStack") or ""),
+                    "techStack": str(
+                        metadata.get("tech_stack")
+                        or metadata.get("techStack")
+                        or ""
+                    ),
                 }
             )
         elif document.source_type == "memory_note":
-            project_memory.append({"title": document.title, "content": document.content})
+            project_memory.append(
+                {"title": document.title, "content": document.content}
+            )
     return {"team_members": team_members, "project_memory": project_memory}
 
 
@@ -690,7 +884,8 @@ async def _run_chatagent_case(
     limit: int,
     agent_factory: Callable[[], ChatAgent],
 ) -> dict[str, Any]:
-    # Each trial gets a clean conversation and rolls back every runtime write.
+    # Each trial gets a clean conversation and rolls back every
+    # runtime write.
     savepoint = db.begin_nested()
     try:
         conversation = Conversation(
@@ -701,8 +896,13 @@ async def _run_chatagent_case(
         db.add(conversation)
         db.flush()
         EvidenceStore(db).rebuild_repo(repo, conversation)
-        assembled = ContextAssembler(db).assemble(repo, conversation, case.question)
-        from app.api.routes.chat import _build_conversation_tools, _skill_runtime_context
+        assembled = ContextAssembler(db).assemble(
+            repo, conversation, case.question
+        )
+        from app.api.routes.chat import (
+            _build_conversation_tools,
+            _skill_runtime_context,
+        )
 
         context: dict[str, Any] = {
             **_evaluation_project_context(db, repo.id),
@@ -748,7 +948,11 @@ def _metric_details(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     }
     for row in rows:
         for name, value in (row.get("ragas") or {}).items():
-            if name in values and isinstance(value, (int, float)) and math.isfinite(float(value)):
+            if (
+                name in values
+                and isinstance(value, (int, float))
+                and math.isfinite(float(value))
+            ):
                 values[name].append(float(value))
     details: dict[str, dict[str, Any]] = {}
     for name, metric_values in values.items():
@@ -776,25 +980,43 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "category": "judge_error",
                 "severity": "error",
                 "title": "Judge 指标计算异常",
-                "summary": f"{names} 未得到可信分数；先仅重试评分，不要据此调整 RAG。",
-                "action": "重试异常指标；若仍失败，再检查超时、模型结构化输出和答案长度。",
+                ("summary"): (
+                    f"{names} 未得到可信分数；先仅重试评分，不要据此调整 RAG。"
+                ),
+                ("action"): (
+                    "重试异常指标；若仍失败，再检查超时、模型结构化输出和"
+                    "答案长度。"
+                ),
             }
         )
     if hard.get("completion_passed") is False:
-        diagnoses.append({
-            "category": "agent_execution", "severity": "failed", "title": "Agent 未正常完成任务",
-            "summary": f"工具循环状态为 {hard.get('completion_status') or 'unknown'}；有检索结果不代表已完成回答。",
-            "action": "检查重复或无新增证据的工具调用，基于已有证据收束回答；不要只提高步数预算。",
-        })
+        diagnoses.append(
+            {
+                "category": "agent_execution",
+                "severity": "failed",
+                "title": "Agent 未正常完成任务",
+                ("summary"): (
+                    f"工具循环状态为 "
+                    f"{hard.get('completion_status') or 'unknown'}；有检索结果"
+                    f"不代表已完成回答。"
+                ),
+                ("action"): (
+                    "检查重复或无新增证据的工具调用，基于已有证据收束回答"
+                    "；不要只提高步数预算。"
+                ),
+            }
+        )
     if not hard.get("source_hit", True) or (
-        hard.get("contexts_required", True) and not hard.get("contexts_present", True)
+        hard.get("contexts_required", True)
+        and not hard.get("contexts_present", True)
     ):
         diagnoses.append(
             {
                 "category": "retrieval",
                 "severity": "failed",
                 "title": "目标证据没有进入回答上下文",
-                "summary": "、".join(hard.get("missing_sources") or []) or "预期来源未命中，或生产检索链没有返回可评分上下文。",
+                "summary": "、".join(hard.get("missing_sources") or [])
+                or "预期来源未命中，或生产检索链没有返回可评分上下文。",
                 "action": "检查切片、Query 改写、来源过滤、Top-K 和 Rerank。",
             }
         )
@@ -804,15 +1026,26 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
         + list(hard.get("missing_conflict_values") or [])
     )
     refusal_missing = hard.get("refusal_matched") is False
-    if rule_failures or hard.get("answer_pattern_matched") is False or refusal_missing:
-        summary = "回答没有明确说明证据不足。" if refusal_missing else "回答遗漏关键事实、包含禁用事实，或没有遵守要求的输出格式。"
+    if (
+        rule_failures
+        or hard.get("answer_pattern_matched") is False
+        or refusal_missing
+    ):
+        summary = (
+            "回答没有明确说明证据不足。"
+            if refusal_missing
+            else "回答遗漏关键事实、包含禁用事实，或没有遵守要求的输出格式。"
+        )
         diagnoses.append(
             {
                 "category": "generation",
                 "severity": "failed",
                 "title": "回答违反确定性验收规则",
                 "summary": summary,
-                "action": "收紧回答指令，并审查 must_include、must_not_include 与格式规则。",
+                ("action"): (
+                    "收紧回答指令，并审查 must_include、must_not_include "
+                    "与格式规则。"
+                ),
             }
         )
     if hard.get("missing_tools") or hard.get("tool_errors"):
@@ -831,8 +1064,14 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
     faithfulness = scores.get("faithfulness")
     relevancy = scores.get("answer_relevancy")
     goal = scores.get("agent_goal_accuracy")
-    precision_low = isinstance(precision, (int, float)) and precision < thresholds["context_precision"]
-    recall_low = isinstance(recall, (int, float)) and recall < thresholds["context_recall"]
+    precision_low = (
+        isinstance(precision, (int, float))
+        and precision < thresholds["context_precision"]
+    )
+    recall_low = (
+        isinstance(recall, (int, float))
+        and recall < thresholds["context_recall"]
+    )
     if precision_low and not recall_low:
         diagnoses.append(
             {
@@ -840,7 +1079,10 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "severity": "failed",
                 "title": "证据找全了，但上下文噪声过多",
                 "summary": "Context Recall 达标而 Context Precision 未达标。",
-                "action": "比较 Top-K、Rerank 和来源状态特征，减少旧资料或同主题噪声。",
+                ("action"): (
+                    "比较 Top-K、Rerank 和来源状态特征，减少旧资料或同主题"
+                    "噪声。"
+                ),
             }
         )
     elif recall_low:
@@ -862,28 +1104,47 @@ def _case_diagnoses(row: dict[str, Any]) -> list[dict[str, str]]:
                 "category": "generation_faithfulness",
                 "severity": "failed",
                 "title": "回答没有忠于检索证据",
-                "summary": "Judge 判定部分回答断言未得到评分上下文支持；需要逐项核对，分数本身不能定位具体错误事实。",
-                "action": "缩短答案，要求逐项依据证据回答，并加强冲突来源处理。",
+                ("summary"): (
+                    "Judge 判定部分回答断言未得到评分上下文支持；需要逐项"
+                    "核对，分数本身不能定位具体错误事实。"
+                ),
+                ("action"): (
+                    "缩短答案，要求逐项依据证据回答，并加强冲突来源处理。"
+                ),
             }
         )
-    if isinstance(relevancy, (int, float)) and relevancy < thresholds["answer_relevancy"]:
+    if (
+        isinstance(relevancy, (int, float))
+        and relevancy < thresholds["answer_relevancy"]
+    ):
         diagnoses.append(
             {
                 "category": "generation_relevancy",
                 "severity": "failed",
                 "title": "回答没有直接回应问题",
-                "summary": "答案相关性低于当前门槛，可能存在过度展开或遗漏用户追问。",
+                ("summary"): (
+                    "答案相关性低于当前门槛，可能存在过度展开或遗漏用户追问。"
+                ),
                 "action": "改进问题拆解和回答结构，删除无关背景与下一步建议。",
             }
         )
-    if isinstance(goal, (int, float)) and goal < thresholds["agent_goal_accuracy"]:
+    if (
+        isinstance(goal, (int, float))
+        and goal < thresholds["agent_goal_accuracy"]
+    ):
         diagnoses.append(
             {
                 "category": "agent_goal",
                 "severity": "failed",
                 "title": "ChatAgent 没有完成题目要求",
-                "summary": "Judge 判定最终结果与参考目标不一致；不能仅凭此分数认定存在句数或格式错误。",
-                "action": "对照原题、参考目标与最终回答人工复核；区分真实遗漏、额外扩写和参考目标定义问题。",
+                ("summary"): (
+                    "Judge 判定最终结果与参考目标不一致；不能仅凭此分数认"
+                    "定存在句数或格式错误。"
+                ),
+                ("action"): (
+                    "对照原题、参考目标与最终回答人工复核；区分真实遗漏、"
+                    "额外扩写和参考目标定义问题。"
+                ),
             }
         )
     if not diagnoses:
@@ -905,7 +1166,11 @@ def _diagnostic_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     error_cases = 0
     for row in rows:
         row["diagnoses"] = _case_diagnoses(row)
-        categories = {item["category"] for item in row["diagnoses"] if item["category"] != "passed"}
+        categories = {
+            item["category"]
+            for item in row["diagnoses"]
+            if item["category"] != "passed"
+        }
         if categories:
             failed_cases += 1
         if row.get("ragas_errors"):
@@ -932,22 +1197,37 @@ def _finalize_result(
     evaluation_set: dict[str, Any] | None,
     rescore_of: str | None = None,
 ) -> dict[str, Any]:
-    judge_rows = [row for row in rows if row.get("ragas_skipped_reason") != NO_ANSWER_SKIP_REASON]
+    judge_rows = [
+        row
+        for row in rows
+        if row.get("ragas_skipped_reason") != NO_ANSWER_SKIP_REASON
+    ]
     metric_rows = _metric_details(judge_rows)
-    hard_passed_cases = sum(1 for row in rows if (row.get("hard_rules") or {}).get("passed"))
+    hard_passed_cases = sum(
+        1 for row in rows if (row.get("hard_rules") or {}).get("passed")
+    )
     hard_pass_rate = round(hard_passed_cases / len(rows), 4) if rows else 0.0
-    case_metric_errors = sum(bool(row.get("ragas_errors")) for row in judge_rows)
+    case_metric_errors = sum(
+        bool(row.get("ragas_errors")) for row in judge_rows
+    )
     judge_required = judge_requested and bool(judge_rows)
     ragas_available = judge_required and scorer is not None
-    required_scored = all(metric_rows[name]["scored_cases"] == len(judge_rows) for name in REQUIRED_RAGAS_METRICS)
-    evaluation_complete = ragas_available and required_scored and case_metric_errors == 0
+    required_scored = all(
+        metric_rows[name]["scored_cases"] == len(judge_rows)
+        for name in REQUIRED_RAGAS_METRICS
+    )
+    evaluation_complete = (
+        ragas_available and required_scored and case_metric_errors == 0
+    )
     gated_names = list(REQUIRED_RAGAS_METRICS)
     gated_names.extend(
         name
         for name in ("tool_call_accuracy", "tool_call_f1")
         if metric_rows[name]["scored_cases"] > 0
     )
-    semantic_failed = any(metric_rows[name]["passed"] is False for name in gated_names)
+    semantic_failed = any(
+        metric_rows[name]["passed"] is False for name in gated_names
+    )
     ragas_passed = evaluation_complete and not semantic_failed
     hard_passed = bool(rows) and hard_passed_cases == len(rows)
     if not rows:
@@ -955,7 +1235,9 @@ def _finalize_result(
         status = "no_cases"
     elif not hard_passed or semantic_failed:
         quality_status = "failed"
-        status = "error" if judge_required and not evaluation_complete else "failed"
+        status = (
+            "error" if judge_required and not evaluation_complete else "failed"
+        )
     elif not judge_required:
         quality_status = "partial"
         status = "partial"
@@ -991,10 +1273,13 @@ def _finalize_result(
         "target": {
             "name": "ChatAgent",
             "repo_id": str(repo_id),
-            "execution": "stored_evidence_rescore" if rescore_of else "production_agent_with_isolated_conversation",
+            "execution": "stored_evidence_rescore"
+            if rescore_of
+            else "production_agent_with_isolated_conversation",
             "evaluation_mode": True,
         },
-        "evaluation_set": evaluation_set or {
+        "evaluation_set": evaluation_set
+        or {
             "id": "auto-document-smoke",
             "name": "auto-document-smoke",
             "label": "自动文档冒烟测试",
@@ -1020,8 +1305,12 @@ def _finalize_result(
             "passed": ragas_passed if evaluation_complete else None,
             "version": scorer.version if scorer is not None else None,
             "judge_model": scorer.judge_model if scorer is not None else None,
-            "error": judge_error or (
-                f"{case_metric_errors} evaluation case(s) contain Ragas metric errors"
+            "error": judge_error
+            or (
+                (
+                    f"{case_metric_errors} evaluation case(s) contain Ragas "
+                    f"metric errors"
+                )
                 if case_metric_errors
                 else None
             ),
@@ -1045,13 +1334,19 @@ async def run_rag_quality_eval(
     progress_callback: ProgressCallback | None = None,
     evaluation_set: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Evaluate the production ChatAgent path with Ragas and deterministic gates."""
+    """Evaluate the production ChatAgent path with Ragas and
+    deterministic gates.
+    """
 
     repo = db.get(Repository, uuid.UUID(str(repo_id)))
     if repo is None:
         raise ValueError(f"Repository {repo_id} was not found")
-    evaluation_cases = cases if cases is not None else _default_cases(db, repo_id)
-    judge_requested = settings.ragas_enabled if run_judge is None else run_judge
+    evaluation_cases = (
+        cases if cases is not None else _default_cases(db, repo_id)
+    )
+    judge_requested = (
+        settings.ragas_enabled if run_judge is None else run_judge
+    )
     total_cases = len(evaluation_cases)
     await _emit_progress(
         progress_callback,
@@ -1061,7 +1356,11 @@ async def run_rag_quality_eval(
         total_cases=total_cases,
     )
     judge_error: str | None = None
-    if judge_requested and scorer is None and any(case.kind != "no_answer" for case in evaluation_cases):
+    if (
+        judge_requested
+        and scorer is None
+        and any(case.kind != "no_answer" for case in evaluation_cases)
+    ):
         try:
             scorer = RagasCollectionsScorer()
         except RagasUnavailableError as exc:
@@ -1074,7 +1373,9 @@ async def run_rag_quality_eval(
         await _emit_progress(
             progress_callback,
             stage="chatagent",
-            message=f"正在运行第 {index}/{total_cases} 条真实 ChatAgent 用例。",
+            message=(
+                f"正在运行第 {index}/{total_cases} 条真实 ChatAgent 用例。"
+            ),
             current_case=index,
             case_id=case.id or f"case-{index}",
             completed_cases=index - 1,
@@ -1088,7 +1389,11 @@ async def run_rag_quality_eval(
             limit=limit,
             agent_factory=agent_factory or ChatAgent,
         )
-        trace = result.get("evaluation_trace") if isinstance(result.get("evaluation_trace"), dict) else {}
+        trace = (
+            result.get("evaluation_trace")
+            if isinstance(result.get("evaluation_trace"), dict)
+            else {}
+        )
         contexts, sources = _trace_rows(trace)
         hard_rules = _hard_rules(case, result, sources, contexts)
         semantic_scores: dict[str, float] | None = None
@@ -1106,7 +1411,10 @@ async def run_rag_quality_eval(
             await _emit_progress(
                 progress_callback,
                 stage="ragas",
-                message=f"ChatAgent 已完成第 {index}/{total_cases} 条，正在计算 RAGAS 指标。",
+                message=(
+                    f"ChatAgent 已完成第 {index}/{total_cases} 条，正在计算 "
+                    f"RAGAS 指标。"
+                ),
                 current_case=index,
                 case_id=case.id or f"case-{index}",
                 completed_cases=index - 1,
@@ -1117,7 +1425,11 @@ async def run_rag_quality_eval(
                 response=str(result.get("answer") or ""),
                 retrieved_contexts=contexts,
                 reference=case.reference,
-                tool_calls=[dict(item) for item in result.get("tool_calls") or [] if isinstance(item, dict)],
+                tool_calls=[
+                    dict(item)
+                    for item in result.get("tool_calls") or []
+                    if isinstance(item, dict)
+                ],
                 tool_observations=[
                     dict(item)
                     for item in trace.get("tool_observations") or []
@@ -1181,7 +1493,9 @@ async def run_rag_quality_eval(
     performance = {
         "cases": len(rows),
         "total_latency_ms": round((time.perf_counter() - started) * 1000, 2),
-        "avg_latency_ms": round(sum(latencies) / len(latencies), 2) if latencies else 0.0,
+        "avg_latency_ms": round(sum(latencies) / len(latencies), 2)
+        if latencies
+        else 0.0,
         "max_latency_ms": max(latencies) if latencies else 0.0,
     }
     return _finalize_result(
@@ -1205,7 +1519,9 @@ def retryable_ragas_metrics(row: dict[str, Any]) -> set[str]:
     expected = set(REQUIRED_RAGAS_METRICS)
     if row.get("expected_tool_calls"):
         expected.update(("tool_call_accuracy", "tool_call_f1"))
-    return (expected - scores.keys()) | (errors.keys() & {*CORE_RAGAS_METRICS, *AGENT_RAGAS_METRICS})
+    return (expected - scores.keys()) | (
+        errors.keys() & {*CORE_RAGAS_METRICS, *AGENT_RAGAS_METRICS}
+    )
 
 
 async def rescore_rag_result(
@@ -1215,7 +1531,9 @@ async def rescore_rag_result(
     scorer: SemanticScorer | None = None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Retry missing or failed Judge metrics without running ChatAgent again."""
+    """Retry missing or failed Judge metrics without running ChatAgent
+    again.
+    """
 
     rows = copy.deepcopy(result.get("cases") or [])
     if not rows:
@@ -1233,7 +1551,9 @@ async def rescore_rag_result(
             judge_error = str(exc)
     started = time.perf_counter()
     completed = 0
-    for index, (row, retry_names) in enumerate(zip(rows, retry_by_case, strict=True), start=1):
+    for index, (row, retry_names) in enumerate(
+        zip(rows, retry_by_case, strict=True), start=1
+    ):
         if not retry_names:
             continue
         await _emit_progress(
@@ -1248,11 +1568,18 @@ async def rescore_rag_result(
         existing_errors = dict(row.get("ragas_errors") or {})
         if scorer is None:
             for name in retry_names:
-                existing_errors[name] = f"RagasUnavailableError: {judge_error or 'Judge unavailable'}"
+                existing_errors[name] = (
+                    f"RagasUnavailableError: "
+                    f"{judge_error or 'Judge unavailable'}"
+                )
             row["ragas_errors"] = existing_errors
             completed += 1
             continue
-        contexts = [str(value) for value in row.get("retrieved_contexts") or [] if str(value).strip()]
+        contexts = [
+            str(value)
+            for value in row.get("retrieved_contexts") or []
+            if str(value).strip()
+        ]
         if not contexts:
             for name in retry_names:
                 existing_errors[name] = "ValueError: no retrieved contexts"
@@ -1264,12 +1591,20 @@ async def rescore_rag_result(
             response=str(row.get("response") or ""),
             retrieved_contexts=contexts,
             reference=str(row.get("reference") or ""),
-            tool_calls=[dict(item) for item in row.get("tool_calls") or [] if isinstance(item, dict)],
+            tool_calls=[
+                dict(item)
+                for item in row.get("tool_calls") or []
+                if isinstance(item, dict)
+            ],
             tool_observations=[
-                dict(item) for item in row.get("tool_observations") or [] if isinstance(item, dict)
+                dict(item)
+                for item in row.get("tool_observations") or []
+                if isinstance(item, dict)
             ],
             expected_tool_calls=[
-                dict(item) for item in row.get("expected_tool_calls") or [] if isinstance(item, dict)
+                dict(item)
+                for item in row.get("expected_tool_calls") or []
+                if isinstance(item, dict)
             ],
             metric_names=retry_names,
         )
@@ -1297,7 +1632,9 @@ async def rescore_rag_result(
         {
             "agent_reused": True,
             "rescore_cases": retry_count,
-            "rescore_latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            "rescore_latency_ms": round(
+                (time.perf_counter() - started) * 1000, 2
+            ),
         }
     )
     top_k = int((result.get("pipeline") or {}).get("top_k") or 5)

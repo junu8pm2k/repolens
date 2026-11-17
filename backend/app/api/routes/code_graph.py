@@ -4,11 +4,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.db.models import CodeRelation, CodeSymbol, PullRequest, Repository, User
+from app.db.models import (
+    CodeRelation,
+    CodeSymbol,
+    PullRequest,
+    Repository,
+    User,
+)
 from app.db.session import get_db
 from app.schemas.code_graph import CodeGraphSearchResponse, CodeSymbolResponse
 from app.services.code_analysis import sync_repository_code_analysis
-from app.services.code_search import read_code_excerpt, repository_checkout_path
+from app.services.code_search import (
+    read_code_excerpt,
+    repository_checkout_path,
+)
 from app.services.permissions import require_permission
 from app.services.worktree_manager import pr_worktree_path
 
@@ -28,7 +37,9 @@ async def rebuild_code_graph(
     return {"repo_id": str(repo.id), "indexed_symbols": symbol_count}
 
 
-@router.get("/repos/{repo_id}/code-symbols", response_model=list[CodeSymbolResponse])
+@router.get(
+    "/repos/{repo_id}/code-symbols", response_model=list[CodeSymbolResponse]
+)
 async def list_code_symbols(
     repo_id: UUID,
     path: str | None = None,
@@ -45,10 +56,17 @@ async def list_code_symbols(
         query = query.filter(CodeSymbol.pr_id == pr_id)
     if pr_number:
         query = query.filter(CodeSymbol.pr_number == pr_number)
-    return query.order_by(CodeSymbol.path.asc(), CodeSymbol.start_line.asc()).limit(limit).all()
+    return (
+        query.order_by(CodeSymbol.path.asc(), CodeSymbol.start_line.asc())
+        .limit(limit)
+        .all()
+    )
 
 
-@router.get("/repos/{repo_id}/code-graph/search", response_model=CodeGraphSearchResponse)
+@router.get(
+    "/repos/{repo_id}/code-graph/search",
+    response_model=CodeGraphSearchResponse,
+)
 async def search_code_graph(
     repo_id: UUID,
     q: str = Query(default=""),
@@ -68,8 +86,14 @@ async def search_code_graph(
     if pr_number:
         query = query.filter(CodeSymbol.pr_number == pr_number)
     if text:
-        query = query.filter(or_(CodeSymbol.name.contains(text), CodeSymbol.path.contains(text)))
-    symbols = query.order_by(CodeSymbol.path.asc(), CodeSymbol.start_line.asc()).limit(limit).all()
+        query = query.filter(
+            or_(CodeSymbol.name.contains(text), CodeSymbol.path.contains(text))
+        )
+    symbols = (
+        query.order_by(CodeSymbol.path.asc(), CodeSymbol.start_line.asc())
+        .limit(limit)
+        .all()
+    )
     symbol_ids = [item.id for item in symbols]
     relations = []
     if symbol_ids:
@@ -79,7 +103,13 @@ async def search_code_graph(
                 CodeRelation.repo_id == repo_id,
                 CodeRelation.pr_id == pr_id if pr_id else True,
                 CodeRelation.pr_number == pr_number if pr_number else True,
-                or_(CodeRelation.source_symbol_id.in_(symbol_ids), CodeRelation.target_symbol_id.in_(symbol_ids), CodeRelation.target_name.in_([item.name for item in symbols])),
+                or_(
+                    CodeRelation.source_symbol_id.in_(symbol_ids),
+                    CodeRelation.target_symbol_id.in_(symbol_ids),
+                    CodeRelation.target_name.in_(
+                        [item.name for item in symbols]
+                    ),
+                ),
             )
             .limit(limit * 4)
             .all()
@@ -87,8 +117,12 @@ async def search_code_graph(
         relations = [
             {
                 "id": str(row.id),
-                "source_symbol_id": str(row.source_symbol_id) if row.source_symbol_id else None,
-                "target_symbol_id": str(row.target_symbol_id) if row.target_symbol_id else None,
+                "source_symbol_id": str(row.source_symbol_id)
+                if row.source_symbol_id
+                else None,
+                "target_symbol_id": str(row.target_symbol_id)
+                if row.target_symbol_id
+                else None,
                 "source_name": row.source_name,
                 "target_name": row.target_name,
                 "relation_type": row.relation_type,
@@ -108,7 +142,9 @@ async def search_code_graph(
     elif pr_number:
         selected_pr = (
             db.query(PullRequest)
-            .filter(PullRequest.repo_id == repo_id, PullRequest.number == pr_number)
+            .filter(
+                PullRequest.repo_id == repo_id, PullRequest.number == pr_number
+            )
             .one_or_none()
         )
     if selected_pr and selected_pr.repo_id == repo_id:
@@ -117,7 +153,9 @@ async def search_code_graph(
             checkout_path = snapshot_path
     if checkout_path.exists():
         for symbol in symbols[:limit]:
-            snippet = read_code_excerpt(checkout_path, symbol.path, symbol.start_line, line_count=7)
+            snippet = read_code_excerpt(
+                checkout_path, symbol.path, symbol.start_line, line_count=7
+            )
             if not snippet:
                 continue
             documents.append(
@@ -134,4 +172,9 @@ async def search_code_graph(
                     "snippet": snippet[:1200],
                 }
             )
-    return {"query": text, "symbols": symbols, "relations": relations, "documents": documents}
+    return {
+        "query": text,
+        "symbols": symbols,
+        "relations": relations,
+        "documents": documents,
+    }

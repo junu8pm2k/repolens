@@ -1,9 +1,9 @@
 import uuid
 from types import SimpleNamespace
+
 import pytest
 
 from app.core.config import settings
-
 from app.services.chat_memory import ProgressiveContextManager
 from app.services.context_compression import (
     MICROCOMPACT_MARKER,
@@ -11,20 +11,22 @@ from app.services.context_compression import (
     calculate_context_pressure,
     compress_messages,
     compress_retrieval_results,
-    ensure_compaction_summary_preserves_key_facts,
-    estimate_tokens,
     default_context_budget,
     effective_context_window_tokens,
+    ensure_compaction_summary_preserves_key_facts,
+    estimate_tokens,
+    fallback_memory_update,
+    merge_memory,
+    messages_after_compact_boundary,
+    microcompact_messages,
     model_context_window_tokens,
     model_output_window_tokens,
-    fallback_memory_update,
-    messages_after_compact_boundary,
-    merge_memory,
-    microcompact_messages,
 )
 
 
-@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"])
+@pytest.mark.parametrize(
+    "model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"]
+)
 def test_deepseek_models_use_the_verified_provider_window(model, monkeypatch):
     monkeypatch.setattr(settings, "context_model_window_tokens", None)
     monkeypatch.setattr(settings, "context_max_input_tokens", 24000)
@@ -32,12 +34,18 @@ def test_deepseek_models_use_the_verified_provider_window(model, monkeypatch):
     assert model_context_window_tokens(model) == 1_048_576
     assert model_output_window_tokens(model) == 393_216
     assert default_context_budget(model).recent_tokens > 200_000
-    assert effective_context_window_tokens(model, for_compaction=True) > 1_000_000
+    assert (
+        effective_context_window_tokens(model, for_compaction=True) > 1_000_000
+    )
 
 
 def test_long_message_is_preserved_in_full_when_it_fits_the_history_budget():
-    content = "这是需要保留的完整历史原文。" * 400 + "末尾的重要决定：保留原始记录。"
-    messages, stats = compress_messages([{"role": "user", "content": content}], max_tokens=10000)
+    content = (
+        "这是需要保留的完整历史原文。" * 400 + "末尾的重要决定：保留原始记录。"
+    )
+    messages, stats = compress_messages(
+        [{"role": "user", "content": content}], max_tokens=10000
+    )
     assert messages[0]["content"] == content
     assert stats["truncated_messages"] == 0
     assert stats["exact_suffix_messages"] == 1
@@ -47,16 +55,25 @@ def test_compress_messages_keeps_recent_turns_under_budget() -> None:
     messages = [
         {"role": "user", "content": "old setup note " * 200},
         {"role": "assistant", "content": "old answer " * 200},
-        {"role": "user", "content": "What did we decide about auth middleware?"},
+        {
+            "role": "user",
+            "content": "What did we decide about auth middleware?",
+        },
     ]
 
     compressed, stats = compress_messages(messages, max_tokens=120)
 
-    assert compressed[-1]["content"] == "What did we decide about auth middleware?"
+    assert (
+        compressed[-1]["content"]
+        == "What did we decide about auth middleware?"
+    )
     assert stats["kept_messages"] < stats["input_messages"]
     assert stats["omitted_messages"] > 0
     assert stats["exact_suffix_messages"] >= 1
-    assert estimate_tokens("\n".join(item["content"] for item in compressed)) <= 140
+    assert (
+        estimate_tokens("\n".join(item["content"] for item in compressed))
+        <= 140
+    )
 
 
 def test_retrieval_compression_prefers_query_relevant_sentence() -> None:
@@ -69,14 +86,21 @@ def test_retrieval_compression_prefers_query_relevant_sentence() -> None:
                 "source_type": "workspace_file",
                 "source_id": "auth",
                 "score": 1.0,
-                "_raw_content": "billing copy. " * 100 + "The auth middleware refreshes expired tokens before validating the session.",
+                "_raw_content": "billing copy. " * 100
+                + (
+                    "The auth middleware refreshes expired tokens before "
+                    "validating the session."
+                ),
             }
         ],
         max_tokens_per_item=40,
     )
 
     assert "auth middleware refreshes expired tokens" in results[0]["snippet"]
-    assert results[0]["compression"]["compressed_estimated_tokens"] < results[0]["compression"]["original_estimated_tokens"]
+    assert (
+        results[0]["compression"]["compressed_estimated_tokens"]
+        < results[0]["compression"]["original_estimated_tokens"]
+    )
     assert "_raw_content" not in results[0]
 
 
@@ -95,8 +119,16 @@ def test_retrieval_compression_respects_global_token_budget() -> None:
         max_total_tokens=75,
     )
 
-    assert sum(item["compression"]["compressed_estimated_tokens"] for item in results) <= 75
-    assert all(item["retrieval"]["selected_for_context"] is True for item in results)
+    assert (
+        sum(
+            item["compression"]["compressed_estimated_tokens"]
+            for item in results
+        )
+        <= 75
+    )
+    assert all(
+        item["retrieval"]["selected_for_context"] is True for item in results
+    )
     assert len(results) < 5
 
 
@@ -108,7 +140,16 @@ def test_memory_update_merges_structured_sections() -> None:
         [],
     )
     merged = merge_memory(
-        {"summary": "", "facts": [], "decisions": [], "open_questions": [], "tasks": [], "user_preferences": [], "repo_context": [], "citations": []},
+        {
+            "summary": "",
+            "facts": [],
+            "decisions": [],
+            "open_questions": [],
+            "tasks": [],
+            "user_preferences": [],
+            "repo_context": [],
+            "citations": [],
+        },
         update,
         update["summary"],
         max_tokens=180,
@@ -131,18 +172,35 @@ def test_microcompact_clears_old_regenerable_tool_context() -> None:
     messages = [
         {
             "role": "tool_result",
-            "content": "irrelevant setup. " * 300 + "The auth middleware refreshes expired tokens before validation.",
+            "content": "irrelevant setup. " * 300
+            + (
+                "The auth middleware refreshes expired tokens before "
+                "validation."
+            ),
             "route": "workspace.read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "arguments": {}, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "workspace.read_file",
+                    "arguments": {},
+                    "status": "success",
+                }
+            ],
         },
-        {"role": "user", "content": "What did we decide about auth middleware?"},
+        {
+            "role": "user",
+            "content": "What did we decide about auth middleware?",
+        },
         {"role": "assistant", "content": "Keep token refresh in middleware."},
     ]
 
-    compacted, stats = microcompact_messages(messages, "auth middleware", keep_recent=2, max_excerpt_tokens=50)
+    compacted, stats = microcompact_messages(
+        messages, "auth middleware", keep_recent=2, max_excerpt_tokens=50
+    )
 
     assert MICROCOMPACT_MARKER in compacted[0]["content"]
-    assert "auth middleware refreshes expired tokens" in compacted[0]["content"]
+    assert (
+        "auth middleware refreshes expired tokens" in compacted[0]["content"]
+    )
     assert compacted[-1]["content"] == "Keep token refresh in middleware."
     assert stats["compacted_messages"] == 1
     assert stats["estimated_tokens_saved"] > 0
@@ -152,11 +210,17 @@ def test_compaction_summary_preserves_paths_errors_and_todos() -> None:
     messages = [
         {
             "role": "user",
-            "content": "Decision: keep token refresh in middleware.\nNext step: run pytest backend/app/tests/test_auth.py.",
+            ("content"): (
+                "Decision: keep token refresh in middleware.\nNext step: "
+                "run pytest backend/app/tests/test_auth.py."
+            ),
         },
         {
             "role": "assistant",
-            "content": "backend/app/auth.py raised TimeoutError: token refresh failed.",
+            ("content"): (
+                "backend/app/auth.py raised TimeoutError: token refresh "
+                "failed."
+            ),
         },
     ]
 
@@ -176,9 +240,17 @@ def test_compaction_summary_preserves_paths_errors_and_todos() -> None:
 def test_messages_after_compact_boundary_uses_latest_boundary() -> None:
     messages = [
         {"role": "user", "content": "old"},
-        {"role": "system", "content": "first", "meta": {"subtype": "compact_boundary"}},
+        {
+            "role": "system",
+            "content": "first",
+            "meta": {"subtype": "compact_boundary"},
+        },
         {"role": "assistant", "content": "middle"},
-        {"role": "system", "content": "latest", "meta": {"subtype": "compact_boundary"}},
+        {
+            "role": "system",
+            "content": "latest",
+            "meta": {"subtype": "compact_boundary"},
+        },
         {"role": "user", "content": "current"},
     ]
 
@@ -192,9 +264,15 @@ def test_keep_start_moves_back_to_preserve_tool_use_result_pair() -> None:
         {
             "role": "assistant",
             "content": "calling read",
-            "tool_calls": [{"id": "call_read", "tool_name": "workspace.read_file"}],
+            "tool_calls": [
+                {"id": "call_read", "tool_name": "workspace.read_file"}
+            ],
         },
-        {"role": "tool_result", "content": "file contents", "tool_call_id": "call_read"},
+        {
+            "role": "tool_result",
+            "content": "file contents",
+            "tool_call_id": "call_read",
+        },
         {"role": "user", "content": "continue"},
     ]
 
@@ -220,7 +298,14 @@ def test_formal_compaction_keep_rows_preserves_tool_pair() -> None:
             tool_calls=[],
             meta={"tool_call_id": "call_read"},
         ),
-        SimpleNamespace(id=uuid.uuid4(), role="user", content="continue", route=None, tool_calls=[], meta={}),
+        SimpleNamespace(
+            id=uuid.uuid4(),
+            role="user",
+            content="continue",
+            route=None,
+            tool_calls=[],
+            meta={},
+        ),
     ]
 
     kept = manager._messages_to_keep(rows, keep_count=2)  # type: ignore[arg-type]
@@ -234,12 +319,16 @@ def test_microcompact_never_rewrites_assistant_final_answer() -> None:
             "role": "assistant",
             "content": "Final answer based on workspace.read_file. " * 300,
             "route": "workspace.read_file",
-            "tool_calls": [{"tool_name": "workspace.read_file", "status": "success"}],
+            "tool_calls": [
+                {"tool_name": "workspace.read_file", "status": "success"}
+            ],
         },
         {"role": "user", "content": "Continue."},
     ]
 
-    compacted, stats = microcompact_messages(messages, "continue", keep_recent=1)
+    compacted, stats = microcompact_messages(
+        messages, "continue", keep_recent=1
+    )
 
     assert compacted[0]["content"] == messages[0]["content"]
     assert stats["compacted_messages"] == 0

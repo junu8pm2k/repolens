@@ -12,7 +12,6 @@ from app.db.models import (
     AgentRun,
     ChatMessage,
     ChatSession,
-    ChatSession as ChatSessionModel,
     Conversation,
     ConversationMemory,
     Document,
@@ -22,6 +21,9 @@ from app.db.models import (
     Repository,
     ThreadMemory,
     WorkflowRun,
+)
+from app.db.models import (
+    ChatSession as ChatSessionModel,
 )
 from app.services.context_compression import (
     COMPACT_BOUNDARY_SUBTYPE,
@@ -36,19 +38,22 @@ from app.services.context_compression import (
     ensure_compaction_summary_preserves_key_facts,
     estimate_tokens,
     extract_relevant_snippet,
-    fallback_memory_update,
     fallback_compaction_summary,
+    fallback_memory_update,
     format_compaction_summary,
     is_compact_boundary_message,
-    messages_after_compact_boundary,
     memory_document_text,
     merge_memory,
+    messages_after_compact_boundary,
     microcompact_messages,
     render_structured_memory,
     structured_memory_from_model,
 )
 from app.services.llm.client import LLMClient
-from app.services.memory_hub import capture_memory_candidates, record_recall_event
+from app.services.memory_hub import (
+    capture_memory_candidates,
+    record_recall_event,
+)
 from app.services.rag.indexing import CI_LOG_CHUNK_CHARS, sanitize_ci_log
 from app.services.rag.retrieval import search_similar_documents
 from app.services.rag.source_policy import RAG_SOURCE_TYPES
@@ -56,11 +61,19 @@ from app.services.rag.vector_store import MilvusUnavailableError
 
 
 def _repo_filter(model: Any, repo_id: uuid.UUID | None) -> Any:
-    return model.repo_id.is_(None) if repo_id is None else model.repo_id == repo_id
+    return (
+        model.repo_id.is_(None)
+        if repo_id is None
+        else model.repo_id == repo_id
+    )
 
 
 def _conversation_filter(model: Any, conversation_id: uuid.UUID | None) -> Any:
-    return model.conversation_id.is_(None) if conversation_id is None else model.conversation_id == conversation_id
+    return (
+        model.conversation_id.is_(None)
+        if conversation_id is None
+        else model.conversation_id == conversation_id
+    )
 
 
 def _tokens(text: str) -> list[str]:
@@ -74,15 +87,32 @@ def pre_retrieval_policy(message: str) -> dict[str, Any]:
     the conversation actually needs a document or a historical record.
     """
     text = message.strip().lower()
-    if re.fullmatch(r"(?:你好|您好|hi|hello|hey|谢谢|好的|好)[\s!！?？。.,，]*", text):
+    if re.fullmatch(
+        r"(?:你好|您好|hi|hello|hey|谢谢|好的|好)[\s!！?？。.,，]*", text
+    ):
         return {"enabled": False, "reason": "social_message"}
     conversational = not _tokens(text) or re.fullmatch(
-        r"(?:你好|您好|hi|hello|hey|谢谢|好的|好|说话|说话啊|继续|在吗|不对|什么意思)[\s!！?？。.,，]*", text
+        r"(?:你好|您好|hi|hello|hey|谢谢|好的|好|说话|说话啊|继续|在吗|不对|什么意思)[\s!！?？。.,，]*",
+        text,
     )
-    recent_recall = re.search(r"刚(?:才|刚)说|上一(?:条消息|句话|句)|my last message|what did i just say", text)
-    record = re.search(r"issue|pull\s*request|\bpr\b|\bci\b|workflow|#\s*\d+|commit", text)
-    field = re.search(r"标题|题目|编号|状态|正文|描述|作者|负责人|链接|title|number|status|state|body|assignee|author|url", text)
-    investigation = re.search(r"历史|相似|关联|分析|排查|根因|为什么|原因|比较|对比|风险|影响|why|history|similar|analy", text)
+    recent_recall = re.search(
+        (
+            "刚(?:才|刚)说|上一(?:条消息|句话|句)|my last message|what did"
+            " i just say"
+        ),
+        text,
+    )
+    record = re.search(
+        r"issue|pull\s*request|\bpr\b|\bci\b|workflow|#\s*\d+|commit", text
+    )
+    field = re.search(
+        r"标题|题目|编号|状态|正文|描述|作者|负责人|链接|title|number|status|state|body|assignee|author|url",
+        text,
+    )
+    investigation = re.search(
+        r"历史|相似|关联|分析|排查|根因|为什么|原因|比较|对比|风险|影响|why|history|similar|analy",
+        text,
+    )
     if conversational or recent_recall:
         return {"enabled": False, "reason": "conversation_or_recent_history"}
     if record and field and not investigation:
@@ -92,7 +122,11 @@ def pre_retrieval_policy(message: str) -> dict[str, Any]:
 
 def _clip(text: str, limit: int) -> str:
     text = (text or "").strip()
-    return text if len(text) <= limit else text[: max(0, limit - 3)].rstrip() + "..."
+    return (
+        text
+        if len(text) <= limit
+        else text[: max(0, limit - 3)].rstrip() + "..."
+    )
 
 
 class MessageStore:
@@ -123,7 +157,12 @@ class MessageStore:
         self.db.flush()
         return message
 
-    def recent(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None, limit: int = 20) -> list[ChatMessage]:
+    def recent(
+        self,
+        repo_id: uuid.UUID | None,
+        conversation_id: uuid.UUID | None,
+        limit: int = 20,
+    ) -> list[ChatMessage]:
         """Return the active context projection, not the complete transcript.
 
         New compact boundaries keep references to the original recent messages
@@ -133,7 +172,9 @@ class MessageStore:
         """
         boundary = self.last_compact_boundary(repo_id, conversation_id)
         if boundary is None:
-            return self.timeline(repo_id, conversation_id, limit=limit, include_system=True)
+            return self.timeline(
+                repo_id, conversation_id, limit=limit, include_system=True
+            )
 
         boundary_meta = boundary.meta or {}
         preserved_ids = [
@@ -160,7 +201,9 @@ class MessageStore:
                     )
                     .all()
                 }
-                preserved_rows = [by_id[item] for item in parsed_ids if item in by_id]
+                preserved_rows = [
+                    by_id[item] for item in parsed_ids if item in by_id
+                ]
 
         rows_after_boundary = (
             self.db.query(ChatMessage)
@@ -180,7 +223,8 @@ class MessageStore:
             and str(row.id) not in preserved_ids
             and not (
                 preserved_ids
-                and (row.meta or {}).get("subtype") == "preserved_after_compact"
+                and (row.meta or {}).get("subtype")
+                == "preserved_after_compact"
             )
         )
         return projected[-max(1, limit) :]
@@ -249,7 +293,9 @@ class MessageStore:
                     )
                 )
 
-        rows = query.order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc()).all()
+        rows = query.order_by(
+            ChatMessage.created_at.asc(), ChatMessage.id.asc()
+        ).all()
         durable = [
             row
             for row in rows
@@ -269,26 +315,42 @@ class MessageStore:
     ) -> list[ChatMessage]:
         return self.recent(repo_id, conversation_id, limit=limit)
 
-    def all_for_context(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None, limit: int = 200) -> list[ChatMessage]:
+    def all_for_context(
+        self,
+        repo_id: uuid.UUID | None,
+        conversation_id: uuid.UUID | None,
+        limit: int = 200,
+    ) -> list[ChatMessage]:
         rows = (
             self.db.query(ChatMessage)
-            .filter(_repo_filter(ChatMessage, repo_id), _conversation_filter(ChatMessage, conversation_id))
+            .filter(
+                _repo_filter(ChatMessage, repo_id),
+                _conversation_filter(ChatMessage, conversation_id),
+            )
             .order_by(ChatMessage.created_at.desc())
             .limit(limit)
             .all()
         )
         return list(reversed(rows))
 
-    def last_compact_boundary(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None) -> ChatMessage | None:
+    def last_compact_boundary(
+        self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None
+    ) -> ChatMessage | None:
         rows = (
             self.db.query(ChatMessage)
-            .filter(_repo_filter(ChatMessage, repo_id), _conversation_filter(ChatMessage, conversation_id), ChatMessage.role == "system")
+            .filter(
+                _repo_filter(ChatMessage, repo_id),
+                _conversation_filter(ChatMessage, conversation_id),
+                ChatMessage.role == "system",
+            )
             .order_by(ChatMessage.created_at.desc())
             .limit(50)
             .all()
         )
         for row in rows:
-            if is_compact_boundary_message({"role": row.role, "meta": row.meta or {}}):
+            if is_compact_boundary_message(
+                {"role": row.role, "meta": row.meta or {}}
+            ):
                 return row
         return None
 
@@ -297,16 +359,23 @@ class EvidenceStore:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def rebuild_repo(self, repo: Repository | None, conversation: Conversation | None = None) -> None:
+    def rebuild_repo(
+        self, repo: Repository | None, conversation: Conversation | None = None
+    ) -> None:
         repo_id = repo.id if repo else None
         conversation_id = conversation.id if conversation else None
         if conversation_id:
             self.db.query(EvidenceItem).filter(
                 _repo_filter(EvidenceItem, repo_id),
-                or_(EvidenceItem.conversation_id == conversation_id, EvidenceItem.conversation_id.is_(None)),
+                or_(
+                    EvidenceItem.conversation_id == conversation_id,
+                    EvidenceItem.conversation_id.is_(None),
+                ),
             ).delete(synchronize_session=False)
         else:
-            self.db.query(EvidenceItem).filter(_repo_filter(EvidenceItem, repo_id)).delete(synchronize_session=False)
+            self.db.query(EvidenceItem).filter(
+                _repo_filter(EvidenceItem, repo_id)
+            ).delete(synchronize_session=False)
 
         if repo:
             self._add(
@@ -315,31 +384,73 @@ class EvidenceStore:
                 "repository",
                 str(repo.id),
                 repo.full_name,
-                "\n".join(filter(None, [repo.description or "", f"默认分支：{repo.default_branch or '未知'}"])),
+                "\n".join(
+                    filter(
+                        None,
+                        [
+                            repo.description or "",
+                            f"默认分支：{repo.default_branch or '未知'}",
+                        ],
+                    )
+                ),
                 {"anchor": f"repo:{repo.full_name}"},
             )
-            for issue in self.db.query(Issue).filter(Issue.repo_id == repo.id).all():
+            for issue in (
+                self.db.query(Issue).filter(Issue.repo_id == repo.id).all()
+            ):
                 self._add(
                     repo.id,
                     None,
                     "issue",
                     str(issue.id),
                     f"Issue #{issue.number}: {issue.title}",
-                    "\n".join(filter(None, [issue.title, issue.body or "", f"state: {issue.state}", f"labels: {', '.join(issue.labels or [])}"])),
+                    "\n".join(
+                        filter(
+                            None,
+                            [
+                                issue.title,
+                                issue.body or "",
+                                f"state: {issue.state}",
+                                f"labels: {', '.join(issue.labels or [])}",
+                            ],
+                        )
+                    ),
                     {"number": issue.number, "state": issue.state},
                 )
-            for pr in self.db.query(PullRequest).filter(PullRequest.repo_id == repo.id).all():
+            for pr in (
+                self.db.query(PullRequest)
+                .filter(PullRequest.repo_id == repo.id)
+                .all()
+            ):
                 self._add(
                     repo.id,
                     None,
                     "pull_request",
                     str(pr.id),
                     f"PR #{pr.number}: {pr.title}",
-                    "\n".join(filter(None, [pr.title, pr.body or "", f"state: {pr.state}", f"base: {pr.base_branch}", f"head: {pr.head_branch}"])),
+                    "\n".join(
+                        filter(
+                            None,
+                            [
+                                pr.title,
+                                pr.body or "",
+                                f"state: {pr.state}",
+                                f"base: {pr.base_branch}",
+                                f"head: {pr.head_branch}",
+                            ],
+                        )
+                    ),
                     {"number": pr.number, "state": pr.state},
                 )
-            for run in self.db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo.id).all():
-                if run.conclusion != "failure" or not (run.logs_text or "").strip():
+            for run in (
+                self.db.query(WorkflowRun)
+                .filter(WorkflowRun.repo_id == repo.id)
+                .all()
+            ):
+                if (
+                    run.conclusion != "failure"
+                    or not (run.logs_text or "").strip()
+                ):
                     continue
                 sanitized_logs = sanitize_ci_log(run.logs_text or "")
                 safe_logs = sanitized_logs[:CI_LOG_CHUNK_CHARS]
@@ -349,25 +460,51 @@ class EvidenceStore:
                     "workflow_run",
                     str(run.id),
                     f"CI: {run.name}",
-                    "\n".join(filter(None, [run.name, run.status, run.conclusion or "", safe_logs])),
+                    "\n".join(
+                        filter(
+                            None,
+                            [
+                                run.name,
+                                run.status,
+                                run.conclusion or "",
+                                safe_logs,
+                            ],
+                        )
+                    ),
                     {
                         "status": run.status,
                         "conclusion": run.conclusion,
-                        "logs_truncated": len(sanitized_logs) > CI_LOG_CHUNK_CHARS,
+                        "logs_truncated": len(sanitized_logs)
+                        > CI_LOG_CHUNK_CHARS,
                         "secrets_redacted": True,
                     },
                 )
             for doc in (
                 self.db.query(Document)
-                .filter(Document.repo_id == repo.id, Document.source_type.in_(RAG_SOURCE_TYPES))
+                .filter(
+                    Document.repo_id == repo.id,
+                    Document.source_type.in_(RAG_SOURCE_TYPES),
+                )
                 .all()
             ):
-                self._add(repo.id, None, doc.source_type, str(doc.source_id), doc.title, doc.content, doc.meta or {})
+                self._add(
+                    repo.id,
+                    None,
+                    doc.source_type,
+                    str(doc.source_id),
+                    doc.title,
+                    doc.content,
+                    doc.meta or {},
+                )
 
         memories = (
-            self.db.query(ConversationMemory).filter(ConversationMemory.conversation_id == conversation_id).all()
+            self.db.query(ConversationMemory)
+            .filter(ConversationMemory.conversation_id == conversation_id)
+            .all()
             if conversation_id
-            else self.db.query(ThreadMemory).filter(_repo_filter(ThreadMemory, repo_id)).all()
+            else self.db.query(ThreadMemory)
+            .filter(_repo_filter(ThreadMemory, repo_id))
+            .all()
         )
         for memory in memories:
             self._add(
@@ -379,18 +516,50 @@ class EvidenceStore:
                 memory_document_text(memory),
                 {"sessions_incorporated": memory.sessions_incorporated},
             )
-        session_query = self.db.query(ChatSession).filter(_repo_filter(ChatSession, repo_id))
-        run_query = self.db.query(AgentRun).filter(_repo_filter(AgentRun, repo_id))
+        session_query = self.db.query(ChatSession).filter(
+            _repo_filter(ChatSession, repo_id)
+        )
+        run_query = self.db.query(AgentRun).filter(
+            _repo_filter(AgentRun, repo_id)
+        )
         if conversation_id:
-            session_query = session_query.filter(ChatSession.conversation_id == conversation_id)
-            run_query = run_query.filter(AgentRun.conversation_id == conversation_id)
-        for session in session_query.order_by(ChatSession.created_at.desc()).limit(30):
-            self._add(repo_id, conversation_id, "session", str(session.id), f"Session digest: {session.route}", session.digest, {"route": session.route})
+            session_query = session_query.filter(
+                ChatSession.conversation_id == conversation_id
+            )
+            run_query = run_query.filter(
+                AgentRun.conversation_id == conversation_id
+            )
+        for session in session_query.order_by(
+            ChatSession.created_at.desc()
+        ).limit(30):
+            self._add(
+                repo_id,
+                conversation_id,
+                "session",
+                str(session.id),
+                f"Session digest: {session.route}",
+                session.digest,
+                {"route": session.route},
+            )
         for run in run_query.order_by(AgentRun.created_at.desc()).limit(30):
-            self._add(repo_id, conversation_id, "agent_run", str(run.id), f"Agent run: {run.route}", f"{run.user_message}\n{run.final_answer}", {"route": run.route})
+            self._add(
+                repo_id,
+                conversation_id,
+                "agent_run",
+                str(run.id),
+                f"Agent run: {run.route}",
+                f"{run.user_message}\n{run.final_answer}",
+                {"route": run.route},
+            )
         self.db.flush()
 
-    def search(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None, query: str, limit: int = 5) -> list[dict[str, Any]]:
+    def search(
+        self,
+        repo_id: uuid.UUID | None,
+        conversation_id: uuid.UUID | None,
+        query: str,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
         query_terms = _tokens(query)
         if not query_terms:
             return []
@@ -408,7 +577,10 @@ class EvidenceStore:
             except MilvusUnavailableError:
                 rag_results = []
             for item in rag_results:
-                key = (str(item.get("source_type") or ""), str(item.get("source_id") or ""))
+                key = (
+                    str(item.get("source_type") or ""),
+                    str(item.get("source_id") or ""),
+                )
                 if key in seen:
                     continue
                 seen.add(key)
@@ -429,7 +601,10 @@ class EvidenceStore:
             self.db.query(EvidenceItem)
             .filter(
                 _repo_filter(EvidenceItem, repo_id),
-                or_(EvidenceItem.conversation_id == conversation_id, EvidenceItem.conversation_id.is_(None)),
+                or_(
+                    EvidenceItem.conversation_id == conversation_id,
+                    EvidenceItem.conversation_id.is_(None),
+                ),
             )
             .order_by(EvidenceItem.created_at.desc())
             .limit(500)
@@ -444,7 +619,9 @@ class EvidenceStore:
             score = sum(haystack.count(term) for term in query_terms)
             if score:
                 ranked.append((score, item))
-        ranked.sort(key=lambda pair: (pair[0], pair[1].created_at), reverse=True)
+        ranked.sort(
+            key=lambda pair: (pair[0], pair[1].created_at), reverse=True
+        )
         for score, item in ranked:
             key = (item.source_type, item.source_id)
             if key in seen:
@@ -455,7 +632,9 @@ class EvidenceStore:
                     "title": item.title,
                     "source_type": item.source_type,
                     "source_id": item.source_id,
-                    "snippet": extract_relevant_snippet(query, item.content, max_tokens=90),
+                    "snippet": extract_relevant_snippet(
+                        query, item.content, max_tokens=90
+                    ),
                     "score": score,
                     "metadata": item.meta or {},
                     "retrieval": {"sources": ["evidence_item_keyword"]},
@@ -465,10 +644,29 @@ class EvidenceStore:
                 break
         return results
 
-    def _add(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None, source_type: str, source_id: str, title: str, content: str, meta: dict[str, Any]) -> None:
+    def _add(
+        self,
+        repo_id: uuid.UUID | None,
+        conversation_id: uuid.UUID | None,
+        source_type: str,
+        source_id: str,
+        title: str,
+        content: str,
+        meta: dict[str, Any],
+    ) -> None:
         if not content.strip():
             return
-        self.db.add(EvidenceItem(repo_id=repo_id, conversation_id=conversation_id, source_type=source_type, source_id=source_id, title=title, content=content, meta=meta))
+        self.db.add(
+            EvidenceItem(
+                repo_id=repo_id,
+                conversation_id=conversation_id,
+                source_type=source_type,
+                source_id=source_id,
+                title=title,
+                content=content,
+                meta=meta,
+            )
+        )
 
 
 @dataclass
@@ -483,16 +681,28 @@ class ContextAssembler:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def assemble(self, repo: Repository | None, conversation: Conversation | None, current_message: str, limit: int = 16) -> AssembledContext:
+    def assemble(
+        self,
+        repo: Repository | None,
+        conversation: Conversation | None,
+        current_message: str,
+        limit: int = 16,
+    ) -> AssembledContext:
         budget = default_context_budget()
         repo_id = repo.id if repo else None
         conversation_id = conversation.id if conversation else None
         message_store = MessageStore(self.db)
-        boundary = message_store.last_compact_boundary(repo_id, conversation_id)
+        boundary = message_store.last_compact_boundary(
+            repo_id, conversation_id
+        )
         memory = (
-            self.db.query(ConversationMemory).filter(ConversationMemory.conversation_id == conversation_id).first()
+            self.db.query(ConversationMemory)
+            .filter(ConversationMemory.conversation_id == conversation_id)
+            .first()
             if conversation_id
-            else self.db.query(ThreadMemory).filter(_repo_filter(ThreadMemory, repo_id)).first()
+            else self.db.query(ThreadMemory)
+            .filter(_repo_filter(ThreadMemory, repo_id))
+            .first()
         )
         latest_session = (
             self.db.query(ChatSession)
@@ -505,9 +715,23 @@ class ContextAssembler:
             .first()
         )
         retrieval_policy = pre_retrieval_policy(current_message)
-        evidence = EvidenceStore(self.db).search(repo_id, conversation_id, current_message, limit=8) if retrieval_policy["enabled"] else []
-        history_fetch_limit = max(limit, min(500, max(30, budget.recent_tokens // 256)))
-        recent = [] if retrieval_policy["reason"] == "social_message" else message_store.recent(repo_id, conversation_id, limit=history_fetch_limit)
+        evidence = (
+            EvidenceStore(self.db).search(
+                repo_id, conversation_id, current_message, limit=8
+            )
+            if retrieval_policy["enabled"]
+            else []
+        )
+        history_fetch_limit = max(
+            limit, min(500, max(30, budget.recent_tokens // 256))
+        )
+        recent = (
+            []
+            if retrieval_policy["reason"] == "social_message"
+            else message_store.recent(
+                repo_id, conversation_id, limit=history_fetch_limit
+            )
+        )
         raw_history = [
             {
                 "role": item.role,
@@ -536,31 +760,62 @@ class ContextAssembler:
             and " ".join(str(raw_history[-1].get("content") or "").split())
             == " ".join(str(current_message or "").split())
         )
-        pending_user_tokens = 0 if current_message_in_history else estimate_tokens(current_message)
-        raw_history_pressure = calculate_context_pressure(raw_history_tokens + pending_user_tokens)
+        pending_user_tokens = (
+            0
+            if current_message_in_history
+            else estimate_tokens(current_message)
+        )
+        raw_history_pressure = calculate_context_pressure(
+            raw_history_tokens + pending_user_tokens
+        )
         history_source = raw_history
         if raw_history_pressure.should_warn:
-            history_source, micro_stats = microcompact_messages(raw_history, current_message)
-        history, history_stats = compress_messages(history_source, budget.recent_tokens)
+            history_source, micro_stats = microcompact_messages(
+                raw_history, current_message
+            )
+        history, history_stats = compress_messages(
+            history_source, budget.recent_tokens
+        )
 
-        def build_context(next_history: list[dict[str, str]], next_evidence: list[dict[str, Any]]) -> str:
+        def build_context(
+            next_history: list[dict[str, str]],
+            next_evidence: list[dict[str, Any]],
+        ) -> str:
             system_sections: list[str] = []
             if repo:
-                system_sections.append(f"[Current Repository]\n{repo.full_name}\n[/Current Repository]")
+                system_sections.append(
+                    (
+                        f"[Current Repository]\n{repo.full_name}\n[/Current "
+                        f"Repository]"
+                    )
+                )
             if conversation and retrieval_policy["enabled"]:
-                system_sections.append(f"[Current Conversation]\n{conversation.title}\n[/Current Conversation]")
+                system_sections.append(
+                    (
+                        f"[Current Conversation]\n{conversation.title}\n[/"
+                        f"Current Conversation]"
+                    )
+                )
 
             sections: list[str] = []
-            stable_system = clip_to_token_budget("\n\n".join(system_sections), budget.system_tokens)
+            stable_system = clip_to_token_budget(
+                "\n\n".join(system_sections), budget.system_tokens
+            )
             if stable_system:
                 sections.append(stable_system)
 
             memory_sections: list[str] = []
             if boundary and boundary.content:
-                transcript_ref = (boundary.meta or {}).get("transcript_ref") or {}
+                transcript_ref = (boundary.meta or {}).get(
+                    "transcript_ref"
+                ) or {}
                 rehydration = (boundary.meta or {}).get("rehydration") or {}
                 recovery_hint = (
-                    "\nExact transcript recovery: call repolens_get_thread_context with this conversation"
+                    (
+                        "\nExact transcript recovery: call "
+                        "repolens_get_thread_context with this "
+                        "conversation"
+                    )
                     if transcript_ref
                     else ""
                 )
@@ -571,51 +826,104 @@ class ContextAssembler:
                         + "\n[/Rehydrated Working State]"
                     )
                 memory_sections.append(
-                    f"[Compaction Boundary]\n{boundary.content}{recovery_hint}\n[/Compaction Boundary]"
+                    (
+                        f"[Compaction Boundary]\n{boundary.content}"
+                        f"{recovery_hint}\n[/Compaction Boundary]"
+                    )
                 )
             if memory and memory_document_text(memory).strip():
-                memory_text = render_structured_memory(memory, max_tokens=max(256, budget.memory_tokens // 2))
-                memory_sections.append(f"[Thread Memory: {memory.sessions_incorporated} sessions]\n{memory_text}\n[/Thread Memory]")
+                memory_text = render_structured_memory(
+                    memory, max_tokens=max(256, budget.memory_tokens // 2)
+                )
+                memory_sections.append(
+                    (
+                        f"[Thread Memory: {memory.sessions_incorporated} "
+                        f"sessions]\n{memory_text}\n[/Thread Memory]"
+                    )
+                )
             if latest_session and latest_session.digest:
-                memory_sections.append(f"[Previous Session Digest]\n{latest_session.digest}\n[/Previous Session Digest]")
-            memory_context = clip_to_token_budget("\n\n".join(memory_sections), budget.memory_tokens) if retrieval_policy["enabled"] else ""
+                memory_sections.append(
+                    (
+                        f"[Previous Session Digest]\n{latest_session.digest}\n"
+                        f"[/Previous Session Digest]"
+                    )
+                )
+            memory_context = (
+                clip_to_token_budget(
+                    "\n\n".join(memory_sections), budget.memory_tokens
+                )
+                if retrieval_policy["enabled"]
+                else ""
+            )
             if memory_context:
                 sections.append(memory_context)
             if next_evidence:
-                evidence_budget = max(120, budget.evidence_tokens // max(len(next_evidence), 1))
+                evidence_budget = max(
+                    120, budget.evidence_tokens // max(len(next_evidence), 1)
+                )
                 lines = ["[Related Evidence]"]
                 for item in next_evidence:
-                    snippet = clip_to_token_budget(item["snippet"], evidence_budget)
-                    lines.append(f"- [{item['source_type']}] {item['title']}: {snippet}")
+                    snippet = clip_to_token_budget(
+                        item["snippet"], evidence_budget
+                    )
+                    lines.append(
+                        f"- [{item['source_type']}] {item['title']}: {snippet}"
+                    )
                 lines.append("[/Related Evidence]")
-                sections.append(clip_to_token_budget("\n".join(lines), budget.evidence_tokens))
+                sections.append(
+                    clip_to_token_budget(
+                        "\n".join(lines), budget.evidence_tokens
+                    )
+                )
             return "\n\n".join(sections)
 
         system_context = build_context(history, evidence)
         history_prompt_tokens = sum(
-            estimate_tokens(item.get("role")) + estimate_tokens(item.get("content"))
+            estimate_tokens(item.get("role"))
+            + estimate_tokens(item.get("content"))
             for item in history
         )
-        initial_prompt_tokens = estimate_tokens(system_context) + history_prompt_tokens + pending_user_tokens
+        initial_prompt_tokens = (
+            estimate_tokens(system_context)
+            + history_prompt_tokens
+            + pending_user_tokens
+        )
         initial_pressure = calculate_context_pressure(initial_prompt_tokens)
         if initial_pressure.should_warn and micro_stats is None:
-            micro_raw_history, micro_stats = microcompact_messages(raw_history, current_message)
-            history, history_stats = compress_messages(micro_raw_history, budget.recent_tokens)
+            micro_raw_history, micro_stats = microcompact_messages(
+                raw_history, current_message
+            )
+            history, history_stats = compress_messages(
+                micro_raw_history, budget.recent_tokens
+            )
             system_context = build_context(history, evidence)
 
         history_prompt_tokens = sum(
-            estimate_tokens(item.get("role")) + estimate_tokens(item.get("content"))
+            estimate_tokens(item.get("role"))
+            + estimate_tokens(item.get("content"))
             for item in history
         )
-        assembled_prompt_tokens = estimate_tokens(system_context) + history_prompt_tokens + pending_user_tokens
+        assembled_prompt_tokens = (
+            estimate_tokens(system_context)
+            + history_prompt_tokens
+            + pending_user_tokens
+        )
         final_pressure = calculate_context_pressure(assembled_prompt_tokens)
-        microcompacted_messages = int((micro_stats or {}).get("compacted_messages") or 0)
+        microcompacted_messages = int(
+            (micro_stats or {}).get("compacted_messages") or 0
+        )
         history_coverage = {
             "source_messages": len(raw_history),
             "prompt_messages": len(history),
-            "omitted_messages": int(history_stats.get("omitted_messages") or 0),
-            "truncated_messages": int(history_stats.get("truncated_messages") or 0),
-            "exact_suffix_messages": int(history_stats.get("exact_suffix_messages") or 0),
+            "omitted_messages": int(
+                history_stats.get("omitted_messages") or 0
+            ),
+            "truncated_messages": int(
+                history_stats.get("truncated_messages") or 0
+            ),
+            "exact_suffix_messages": int(
+                history_stats.get("exact_suffix_messages") or 0
+            ),
             "source_limit_reached": len(recent) >= history_fetch_limit,
             "has_compaction_boundary": boundary is not None,
             "microcompacted_messages": microcompacted_messages,
@@ -644,10 +952,16 @@ class ContextAssembler:
                 "raw_history_pressure": raw_history_pressure.as_dict(),
                 "compact_boundary": {
                     "id": str(boundary.id) if boundary else None,
-                    "created_at": boundary.created_at.isoformat() if boundary and boundary.created_at else None,
-                    "mode": (boundary.meta or {}).get("mode") if boundary else None,
+                    "created_at": boundary.created_at.isoformat()
+                    if boundary and boundary.created_at
+                    else None,
+                    "mode": (boundary.meta or {}).get("mode")
+                    if boundary
+                    else None,
                 },
-                "system_context_estimated_tokens": estimate_tokens(system_context),
+                "system_context_estimated_tokens": estimate_tokens(
+                    system_context
+                ),
                 "history_estimated_tokens": history_prompt_tokens,
                 "pending_user_estimated_tokens": pending_user_tokens,
                 "assembled_prompt_estimated_tokens": assembled_prompt_tokens,
@@ -670,38 +984,64 @@ class ProgressiveContextManager:
         self.db = db
         self.llm = llm or LLMClient()
 
-    async def ensure_headroom(self, repo: Repository | None, conversation: Conversation | None, current_message: str) -> dict[str, Any]:
+    async def ensure_headroom(
+        self,
+        repo: Repository | None,
+        conversation: Conversation | None,
+        current_message: str,
+    ) -> dict[str, Any]:
         if repo is None or conversation is None:
             return {"attempted": False, "reason": "no_repo_or_conversation"}
         policy = pre_retrieval_policy(current_message)
         if policy["reason"] in {"social_message", "structured_record_lookup"}:
             return {"attempted": False, "reason": "narrow_request"}
-        assembled = ContextAssembler(self.db).assemble(repo, conversation, current_message)
+        assembled = ContextAssembler(self.db).assemble(
+            repo, conversation, current_message
+        )
         assembled_pressure = assembled.compression_stats.get("pressure") or {}
         micro_stats = assembled.compression_stats.get("microcompact") or {}
-        raw_segment_tokens = self._raw_segment_tokens(repo.id, conversation.id) + estimate_tokens(current_message)
+        raw_segment_tokens = self._raw_segment_tokens(
+            repo.id, conversation.id
+        ) + estimate_tokens(current_message)
         assembled_tokens = int(
-            assembled.compression_stats.get("assembled_prompt_estimated_tokens")
-            or assembled.compression_stats.get("system_context_estimated_tokens")
+            assembled.compression_stats.get(
+                "assembled_prompt_estimated_tokens"
+            )
+            or assembled.compression_stats.get(
+                "system_context_estimated_tokens"
+            )
             or 0
         )
         raw_pressure_state = calculate_context_pressure(raw_segment_tokens)
         assembled_pressure_state = calculate_context_pressure(assembled_tokens)
-        pressure_state = calculate_context_pressure(max(raw_segment_tokens, assembled_tokens))
+        pressure_state = calculate_context_pressure(
+            max(raw_segment_tokens, assembled_tokens)
+        )
         pressure = {
             **pressure_state.as_dict(),
             "raw_segment_estimated_tokens": raw_segment_tokens,
             "assembled_context_estimated_tokens": assembled_tokens,
             "raw_stage": raw_pressure_state.stage,
-            "assembled_stage": assembled_pressure.get("stage") or assembled_pressure_state.stage,
-            "microcompact_estimated_tokens_saved": micro_stats.get("estimated_tokens_saved", 0),
-            "microcompact_compacted_messages": micro_stats.get("compacted_messages", 0),
+            "assembled_stage": assembled_pressure.get("stage")
+            or assembled_pressure_state.stage,
+            "microcompact_estimated_tokens_saved": micro_stats.get(
+                "estimated_tokens_saved", 0
+            ),
+            "microcompact_compacted_messages": micro_stats.get(
+                "compacted_messages", 0
+            ),
         }
         raw_stage = raw_pressure_state.stage
-        prompt_stage = str(pressure.get("assembled_stage") or assembled_pressure_state.stage)
+        prompt_stage = str(
+            pressure.get("assembled_stage") or assembled_pressure_state.stage
+        )
         stage = str(pressure.get("stage") or "normal")
         if not settings.context_auto_compact_enabled:
-            return {"attempted": False, "reason": "auto_compact_disabled", "pressure": pressure}
+            return {
+                "attempted": False,
+                "reason": "auto_compact_disabled",
+                "pressure": pressure,
+            }
         if (
             prompt_stage in {"normal", "warning"}
             and raw_stage in {"auto_compact", "aggressive", "manual_path"}
@@ -726,11 +1066,22 @@ class ProgressiveContextManager:
             }
 
         try:
-            result = await self._compact(repo, conversation, current_message, pressure, stage)
-            return {"attempted": True, **result, "pressure": pressure, "consecutive_failures": 0}
-        except Exception as exc:  # pragma: no cover - defensive circuit breaker path
+            result = await self._compact(
+                repo, conversation, current_message, pressure, stage
+            )
+            return {
+                "attempted": True,
+                **result,
+                "pressure": pressure,
+                "consecutive_failures": 0,
+            }
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - defensive circuit breaker path
             self.db.rollback()
-            failure = self._record_failure(repo.id, conversation.id, current_message, stage, exc)
+            failure = self._record_failure(
+                repo.id, conversation.id, current_message, stage, exc
+            )
             self.db.flush()
             return {
                 "attempted": True,
@@ -751,15 +1102,22 @@ class ProgressiveContextManager:
         stage: str,
     ) -> dict[str, Any]:
         store = MessageStore(self.db)
-        all_rows = store.active_for_context(repo.id, conversation.id, limit=500)
+        all_rows = store.active_for_context(
+            repo.id, conversation.id, limit=500
+        )
         all_messages = [self._row_to_message(row) for row in all_rows]
-        segment_messages = messages_after_compact_boundary(all_messages, include_boundary=False)
-        message_ids = {str(item.get("id")) for item in segment_messages if item.get("id")}
+        segment_messages = messages_after_compact_boundary(
+            all_messages, include_boundary=False
+        )
+        message_ids = {
+            str(item.get("id")) for item in segment_messages if item.get("id")
+        }
         segment_rows = [row for row in all_rows if str(row.id) in message_ids]
         candidate_rows = [
             row
             for row in segment_rows
-            if row.role in {"user", "assistant", "tool", "tool_use", "tool_result"}
+            if row.role
+            in {"user", "assistant", "tool", "tool_use", "tool_result"}
         ]
         plan_stages = [stage]
         if stage == "auto_compact":
@@ -767,24 +1125,34 @@ class ProgressiveContextManager:
         elif stage == "aggressive":
             plan_stages.append("manual_path")
         plans = [self._compaction_plan_for_stage(item) for item in plan_stages]
-        if len(candidate_rows) <= min(int(item["keep_recent"]) for item in plans) + 1:
+        if (
+            len(candidate_rows)
+            <= min(int(item["keep_recent"]) for item in plans) + 1
+        ):
             return {"compacted": False, "reason": "not_enough_messages"}
 
         attempts: list[dict[str, Any]] = []
-        selected: tuple[
-            dict[str, Any],
-            list[ChatMessage],
-            list[ChatMessage],
-            str,
-            str,
-            dict[str, Any],
-            int,
-        ] | None = None
+        selected: (
+            tuple[
+                dict[str, Any],
+                list[ChatMessage],
+                list[ChatMessage],
+                str,
+                str,
+                dict[str, Any],
+                int,
+            ]
+            | None
+        ) = None
         rehydration = self._rehydration_state(candidate_rows)
         for index, plan in enumerate(plans, start=1):
-            keep_rows = self._messages_to_keep(candidate_rows, keep_count=int(plan["keep_recent"]))
+            keep_rows = self._messages_to_keep(
+                candidate_rows, keep_count=int(plan["keep_recent"])
+            )
             keep_ids = {row.id for row in keep_rows}
-            summarize_rows = [row for row in candidate_rows if row.id not in keep_ids]
+            summarize_rows = [
+                row for row in candidate_rows if row.id not in keep_ids
+            ]
             if not summarize_rows:
                 continue
             summary, mode, preservation_report = await self._summary_for(
@@ -826,7 +1194,15 @@ class ProgressiveContextManager:
 
         if selected is None:
             return {"compacted": False, "reason": "nothing_to_summarize"}
-        plan, keep_rows, summarize_rows, summary, mode, preservation_report, post_compact_tokens = selected
+        (
+            plan,
+            keep_rows,
+            summarize_rows,
+            summary,
+            mode,
+            preservation_report,
+            post_compact_tokens,
+        ) = selected
         boundary = self._insert_boundary(
             repo,
             conversation,
@@ -846,7 +1222,9 @@ class ProgressiveContextManager:
             "messages_summarized": len(summarize_rows),
             "messages_preserved": len(keep_rows),
             "post_compact_estimated_tokens": post_compact_tokens,
-            "post_compact_pressure": calculate_context_pressure(post_compact_tokens).as_dict(),
+            "post_compact_pressure": calculate_context_pressure(
+                post_compact_tokens
+            ).as_dict(),
             "compaction_plan": plan,
             "compaction_attempts": attempts,
             "rehydration": rehydration,
@@ -854,23 +1232,46 @@ class ProgressiveContextManager:
 
     def _compaction_plan_for_stage(self, stage: str) -> dict[str, Any]:
         default_keep = max(2, settings.context_compact_keep_recent_messages)
-        default_summary_tokens = max(256, settings.context_compact_summary_tokens)
+        default_summary_tokens = max(
+            256, settings.context_compact_summary_tokens
+        )
         if stage == "manual_path":
             return {
-                "keep_recent": max(2, min(default_keep, max(2, default_keep // 3))),
-                "summary_tokens": min(default_summary_tokens, max(256, int(default_summary_tokens * 0.5))),
+                "keep_recent": max(
+                    2, min(default_keep, max(2, default_keep // 3))
+                ),
+                "summary_tokens": min(
+                    default_summary_tokens,
+                    max(256, int(default_summary_tokens * 0.5)),
+                ),
                 "mode_prefix": "manual_path",
             }
         if stage == "aggressive":
             return {
-                "keep_recent": max(2, min(default_keep, max(3, default_keep // 2))),
-                "summary_tokens": min(default_summary_tokens, max(256, int(default_summary_tokens * 0.67))),
+                "keep_recent": max(
+                    2, min(default_keep, max(3, default_keep // 2))
+                ),
+                "summary_tokens": min(
+                    default_summary_tokens,
+                    max(256, int(default_summary_tokens * 0.67)),
+                ),
                 "mode_prefix": "aggressive",
             }
-        return {"keep_recent": default_keep, "summary_tokens": default_summary_tokens, "mode_prefix": ""}
+        return {
+            "keep_recent": default_keep,
+            "summary_tokens": default_summary_tokens,
+            "mode_prefix": "",
+        }
 
-    def _messages_to_keep(self, rows: list[ChatMessage], keep_count: int | None = None) -> list[ChatMessage]:
-        keep = max(2, keep_count if keep_count is not None else settings.context_compact_keep_recent_messages)
+    def _messages_to_keep(
+        self, rows: list[ChatMessage], keep_count: int | None = None
+    ) -> list[ChatMessage]:
+        keep = max(
+            2,
+            keep_count
+            if keep_count is not None
+            else settings.context_compact_keep_recent_messages,
+        )
         start_index = max(0, len(rows) - keep)
         start_index = adjust_keep_start_to_preserve_api_invariants(
             [self._row_to_message(row) for row in rows],
@@ -895,28 +1296,46 @@ class ProgressiveContextManager:
         max_summary_tokens: int,
     ) -> tuple[str, str, dict[str, Any]]:
         messages = [self._row_to_message(row) for row in rows]
-        memory = self.db.query(ConversationMemory).filter(ConversationMemory.conversation_id == conversation.id).first()
+        memory = (
+            self.db.query(ConversationMemory)
+            .filter(ConversationMemory.conversation_id == conversation.id)
+            .first()
+        )
         if memory and memory_document_text(memory).strip():
-            summary = render_structured_memory(memory, max_tokens=max_summary_tokens)
-            continuation = (
-                "This conversation was compacted using structured session memory. "
-                "Continue from the preserved recent messages and the current user request.\n\n"
-                f"{summary}"
+            summary = render_structured_memory(
+                memory, max_tokens=max_summary_tokens
             )
-            summary, report = ensure_compaction_summary_preserves_key_facts(messages, continuation, max_summary_tokens)
+            continuation = (
+                f"This conversation was compacted using structured session "
+                f"memory. Continue from the preserved recent messages and the "
+                f"current user request.\n\n{summary}"
+            )
+            summary, report = ensure_compaction_summary_preserves_key_facts(
+                messages, continuation, max_summary_tokens
+            )
             return summary, "session_memory", report
 
         payload = build_compaction_summary_payload(messages)
         llm_summary = await self.llm.chat_text(
             COMPACT_SUMMARY_SYSTEM_PROMPT,
-            f"Current user request that triggered pressure:\n{current_message}\n\nConversation segment to compact:\n{payload}",
+            (
+                f"Current user request that triggered pressure:\n"
+                f"{current_message}\n\nConversation segment to compact:\n"
+                f"{payload}"
+            ),
         )
         summary = format_compaction_summary(llm_summary)
         if not summary:
-            summary = fallback_compaction_summary(messages, max_tokens=max_summary_tokens)
-            summary, report = ensure_compaction_summary_preserves_key_facts(messages, summary, max_summary_tokens)
+            summary = fallback_compaction_summary(
+                messages, max_tokens=max_summary_tokens
+            )
+            summary, report = ensure_compaction_summary_preserves_key_facts(
+                messages, summary, max_summary_tokens
+            )
             return summary, "fallback_extractive", report
-        summary, report = ensure_compaction_summary_preserves_key_facts(messages, summary, max_summary_tokens)
+        summary, report = ensure_compaction_summary_preserves_key_facts(
+            messages, summary, max_summary_tokens
+        )
         return summary, "full_compaction", report
 
     def _insert_boundary(
@@ -933,11 +1352,17 @@ class ProgressiveContextManager:
     ) -> ChatMessage:
         now = datetime.now(timezone.utc)
         latest_source_time = max(
-            (row.created_at for row in [*summarized_rows, *keep_rows] if row.created_at),
+            (
+                row.created_at
+                for row in [*summarized_rows, *keep_rows]
+                if row.created_at
+            ),
             default=None,
         )
         if latest_source_time:
-            comparable_now = now if latest_source_time.tzinfo else now.replace(tzinfo=None)
+            comparable_now = (
+                now if latest_source_time.tzinfo else now.replace(tzinfo=None)
+            )
             if latest_source_time >= comparable_now:
                 now = latest_source_time + timedelta(microseconds=1)
         boundary = ChatMessage(
@@ -952,10 +1377,18 @@ class ProgressiveContextManager:
                 "trigger": "auto",
                 "mode": mode,
                 "pressure": pressure,
-                "pre_compact_message_id": str(summarized_rows[-1].id) if summarized_rows else None,
-                "summarized_from_message_id": str(summarized_rows[0].id) if summarized_rows else None,
-                "summarized_to_message_id": str(summarized_rows[-1].id) if summarized_rows else None,
-                "preserved_start_message_id": str(keep_rows[0].id) if keep_rows else None,
+                "pre_compact_message_id": str(summarized_rows[-1].id)
+                if summarized_rows
+                else None,
+                "summarized_from_message_id": str(summarized_rows[0].id)
+                if summarized_rows
+                else None,
+                "summarized_to_message_id": str(summarized_rows[-1].id)
+                if summarized_rows
+                else None,
+                "preserved_start_message_id": str(keep_rows[0].id)
+                if keep_rows
+                else None,
                 "preserved_message_ids": [str(row.id) for row in keep_rows],
                 "transcript_ref": {
                     "repo_id": str(repo.id),
@@ -1003,22 +1436,42 @@ class ProgressiveContextManager:
                 del target[0 : len(target) - limit]
 
         for row in rows:
-            calls = [item for item in (row.tool_calls or []) if isinstance(item, dict)]
-            events = [item for item in (row.meta or {}).get("agent_events") or [] if isinstance(item, dict)]
+            calls = [
+                item
+                for item in (row.tool_calls or [])
+                if isinstance(item, dict)
+            ]
+            events = [
+                item
+                for item in (row.meta or {}).get("agent_events") or []
+                if isinstance(item, dict)
+            ]
             for call in calls:
                 remember(recent_tools, call.get("tool_name"), 8)
                 arguments = call.get("arguments") or {}
                 if isinstance(arguments, dict):
-                    remember(working_files, arguments.get("path") or arguments.get("file_path"), 5)
+                    remember(
+                        working_files,
+                        arguments.get("path") or arguments.get("file_path"),
+                        5,
+                    )
             for event in events:
                 event_type = str(event.get("type") or "")
                 if event_type in {"tool_use", "tool_result"}:
                     remember(recent_tools, event.get("tool_name"), 8)
                 arguments = event.get("arguments") or {}
                 if isinstance(arguments, dict):
-                    remember(working_files, arguments.get("path") or arguments.get("file_path"), 5)
+                    remember(
+                        working_files,
+                        arguments.get("path") or arguments.get("file_path"),
+                        5,
+                    )
                 if event_type == "skill_activated":
-                    remember(active_skills, event.get("skill_name") or event.get("skill_title"), 6)
+                    remember(
+                        active_skills,
+                        event.get("skill_name") or event.get("skill_title"),
+                        6,
+                    )
 
         return {
             "working_files": working_files,
@@ -1030,15 +1483,23 @@ class ProgressiveContextManager:
             },
         }
 
-    def _raw_segment_tokens(self, repo_id: uuid.UUID, conversation_id: uuid.UUID) -> int:
-        rows = MessageStore(self.db).active_for_context(repo_id, conversation_id, limit=1000)
-        messages = messages_after_compact_boundary([self._row_to_message(row) for row in rows], include_boundary=False)
+    def _raw_segment_tokens(
+        self, repo_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> int:
+        rows = MessageStore(self.db).active_for_context(
+            repo_id, conversation_id, limit=1000
+        )
+        messages = messages_after_compact_boundary(
+            [self._row_to_message(row) for row in rows], include_boundary=False
+        )
         total = 0
         for message in messages:
             total += estimate_tokens(str(message.get("role") or ""))
             total += estimate_tokens(str(message.get("content") or ""))
             if message.get("tool_calls"):
-                total += estimate_tokens(dumps_compact(message.get("tool_calls")))
+                total += estimate_tokens(
+                    dumps_compact(message.get("tool_calls"))
+                )
         return total
 
     def _row_to_message(self, row: ChatMessage) -> dict[str, Any]:
@@ -1051,8 +1512,12 @@ class ProgressiveContextManager:
             "meta": row.meta or {},
         }
 
-    def _consecutive_failures(self, repo_id: uuid.UUID, conversation_id: uuid.UUID) -> int:
-        boundary = MessageStore(self.db).last_compact_boundary(repo_id, conversation_id)
+    def _consecutive_failures(
+        self, repo_id: uuid.UUID, conversation_id: uuid.UUID
+    ) -> int:
+        boundary = MessageStore(self.db).last_compact_boundary(
+            repo_id, conversation_id
+        )
         query = self.db.query(ChatMessage).filter(
             ChatMessage.repo_id == repo_id,
             ChatMessage.conversation_id == conversation_id,
@@ -1062,19 +1527,32 @@ class ProgressiveContextManager:
         if boundary and boundary.created_at:
             query = query.filter(ChatMessage.created_at > boundary.created_at)
         count = 0
-        for row in query.order_by(ChatMessage.created_at.desc()).limit(settings.context_max_compaction_failures).all():
+        for row in (
+            query.order_by(ChatMessage.created_at.desc())
+            .limit(settings.context_max_compaction_failures)
+            .all()
+        ):
             if (row.meta or {}).get("subtype") == "compact_failure":
                 count += 1
             else:
                 break
         return count
 
-    def _record_failure(self, repo_id: uuid.UUID, conversation_id: uuid.UUID, current_message: str, stage: str, exc: Exception) -> ChatMessage:
+    def _record_failure(
+        self,
+        repo_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        current_message: str,
+        stage: str,
+        exc: Exception,
+    ) -> ChatMessage:
         failure = ChatMessage(
             repo_id=repo_id,
             conversation_id=conversation_id,
             role="system",
-            content=clip_to_token_budget(f"Context compaction failed during {stage}: {exc}", 240),
+            content=clip_to_token_budget(
+                f"Context compaction failed during {stage}: {exc}", 240
+            ),
             route="context_compaction",
             tool_calls=[],
             meta={
@@ -1124,13 +1602,23 @@ class SessionSealer:
             route=route,
             transcript_json={
                 "messages": [
-                    {"role": "user", "content": user_message.content, "created_at": self._iso(user_message.created_at)},
-                    {"role": "assistant", "content": assistant_message.content, "created_at": self._iso(assistant_message.created_at)},
+                    {
+                        "role": "user",
+                        "content": user_message.content,
+                        "created_at": self._iso(user_message.created_at),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": assistant_message.content,
+                        "created_at": self._iso(assistant_message.created_at),
+                    },
                 ],
                 "tool_calls": tool_calls,
                 "agent_events": agent_events,
                 "tool_use_results": [
-                    event for event in agent_events if event.get("type") in {"tool_use", "tool_result"}
+                    event
+                    for event in agent_events
+                    if event.get("type") in {"tool_use", "tool_result"}
                 ],
                 "model_usage": model_usage,
                 "context_diagnostics": context_diagnostics,
@@ -1157,8 +1645,13 @@ class SessionSealer:
                 repo_id=repo.id if repo else None,
                 conversation_id=conversation.id if conversation else None,
             )
-            digest = str(memory_update.pop("_digest", "") or memory_update.get("summary") or fallback_digest)
-        except Exception as exc:  # model/network failures must not invalidate the completed chat turn
+            digest = str(
+                memory_update.pop("_digest", "")
+                or memory_update.get("summary")
+                or fallback_digest
+            )
+        # Model/network failures must not invalidate the completed chat turn.
+        except Exception as exc:
             errors.append(f"memory_extraction_failed: {exc}")
             memory_update = fallback_update
             digest = fallback_digest
@@ -1179,12 +1672,16 @@ class SessionSealer:
                     memory_update=memory_update,
                 )
                 self.db.flush()
-        except Exception as exc:  # keep raw ChatSession even when enrichment fails
+        except (
+            Exception
+        ) as exc:  # keep raw ChatSession even when enrichment fails
             errors.append(f"memory_persistence_failed: {exc}")
 
         transcript = dict(session.transcript_json or {})
         transcript["memory_update"] = {
-            key: value for key, value in memory_update.items() if not key.startswith("_")
+            key: value
+            for key, value in memory_update.items()
+            if not key.startswith("_")
         }
         transcript["sealing"] = {
             "phase": "completed",
@@ -1209,7 +1706,9 @@ class SessionSealer:
         repo_id: uuid.UUID | None,
         conversation_id: uuid.UUID | None,
     ) -> dict[str, Any]:
-        fallback = fallback_memory_update(user_message, assistant_message, route, tool_calls)
+        fallback = fallback_memory_update(
+            user_message, assistant_message, route, tool_calls
+        )
         if repo_id and conversation_id:
             current_memory: ConversationMemory | ThreadMemory | None = (
                 self.db.query(ConversationMemory)
@@ -1222,13 +1721,16 @@ class SessionSealer:
                 .filter(_repo_filter(ThreadMemory, repo_id))
                 .first()
             )
-        existing_memory = self._memory_state(current_memory) if current_memory else {}
+        existing_memory = (
+            self._memory_state(current_memory) if current_memory else {}
+        )
         prompt = (
-            "请增量更新软件工程 Agent 的数据库会话记忆。"
-            "输入包含已有记忆和本轮原始记录；返回更新后的完整快照，而不是只返回本轮增量。"
-            "只返回 JSON，包含 digest、summary、facts、decisions、open_questions、tasks、"
-            "user_preferences、repo_context、citations。summary 必须描述当前工作状态和下一步；"
-            "保留重要文件、函数、命令、错误修复和用户纠正，不要编造。"
+            "请增量更新软件工程 Agent 的数据库会话记忆。输入包含已有记忆和"
+            "本轮原始记录；返回更新后的完整快照，而不是只返回本轮增量。只"
+            "返回 JSON，包含 digest、summary、facts、decisions、"
+            "open_questions、tasks、user_preferences、repo_context、"
+            "citations。summary 必须描述当前工作状态和下一步；保留重要文件"
+            "、函数、命令、错误修复和用户纠正，不要编造。"
         )
         parsed = await self.llm.chat_json(
             prompt,
@@ -1246,22 +1748,29 @@ class SessionSealer:
             update["summary"] = fallback["summary"]
         if parsed:
             update["_update_mode"] = "snapshot"
-            update["_digest"] = str(parsed.get("digest") or parsed.get("summary") or digest)
+            update["_digest"] = str(
+                parsed.get("digest") or parsed.get("summary") or digest
+            )
         return update
 
-    def _memory_state(self, memory: ConversationMemory | ThreadMemory) -> dict[str, Any]:
+    def _memory_state(
+        self, memory: ConversationMemory | ThreadMemory
+    ) -> dict[str, Any]:
         return {
             "summary": memory.summary or "",
             "facts": getattr(memory, "facts", None) or [],
             "decisions": memory.decisions or [],
             "open_questions": memory.open_questions or [],
             "tasks": getattr(memory, "tasks", None) or [],
-            "user_preferences": getattr(memory, "user_preferences", None) or [],
+            "user_preferences": getattr(memory, "user_preferences", None)
+            or [],
             "repo_context": getattr(memory, "repo_context", None) or [],
             "citations": getattr(memory, "citations", None) or [],
         }
 
-    def _new_memory(self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None) -> ConversationMemory | ThreadMemory:
+    def _new_memory(
+        self, repo_id: uuid.UUID | None, conversation_id: uuid.UUID | None
+    ) -> ConversationMemory | ThreadMemory:
         if repo_id and conversation_id:
             memory = ConversationMemory(
                 repo_id=repo_id,
@@ -1301,18 +1810,33 @@ class SessionSealer:
         memory_update: dict[str, Any],
     ) -> ConversationMemory | ThreadMemory | None:
         if repo_id and conversation_id:
-            memory: ConversationMemory | ThreadMemory | None = self.db.query(ConversationMemory).filter(ConversationMemory.conversation_id == conversation_id).first()
+            memory: ConversationMemory | ThreadMemory | None = (
+                self.db.query(ConversationMemory)
+                .filter(ConversationMemory.conversation_id == conversation_id)
+                .first()
+            )
         else:
-            memory = self.db.query(ThreadMemory).filter(_repo_filter(ThreadMemory, repo_id)).first()
+            memory = (
+                self.db.query(ThreadMemory)
+                .filter(_repo_filter(ThreadMemory, repo_id))
+                .first()
+            )
         if not memory:
             memory = self._new_memory(repo_id, conversation_id)
         if memory_update.get("_update_mode") == "snapshot":
             merged = {
                 **structured_memory_from_model(memory_update),
-                "summary": clip_to_token_budget(str(memory_update.get("summary") or digest), 1100),
+                "summary": clip_to_token_budget(
+                    str(memory_update.get("summary") or digest), 1100
+                ),
             }
         else:
-            merged = merge_memory(self._memory_state(memory), memory_update, digest, max_tokens=1100)
+            merged = merge_memory(
+                self._memory_state(memory),
+                memory_update,
+                digest,
+                max_tokens=1100,
+            )
         memory.summary = merged["summary"]
         memory.facts = merged["facts"]
         memory.decisions = merged["decisions"]
@@ -1329,20 +1853,44 @@ class SessionSealer:
 
 
 class MemoryTools:
-    def __init__(self, db: Session, repo: Repository | None, conversation: Conversation | None = None) -> None:
+    def __init__(
+        self,
+        db: Session,
+        repo: Repository | None,
+        conversation: Conversation | None = None,
+    ) -> None:
         self.db = db
         self.repo = repo
         self.repo_id = repo.id if repo else None
         self.conversation = conversation
         self.conversation_id = conversation.id if conversation else None
 
-    async def search_evidence(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def search_evidence(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         query = str(input_data.get("query") or input_data.get("message") or "")
-        results = EvidenceStore(self.db).search(self.repo_id, self.conversation_id, query, limit=int(input_data.get("limit") or 5))
-        answer = "No evidence matched this query." if not results else "\n".join(
-            f"- [{item['source_type']}] {item['title']}: {item['snippet']}" for item in results
+        results = EvidenceStore(self.db).search(
+            self.repo_id,
+            self.conversation_id,
+            query,
+            limit=int(input_data.get("limit") or 5),
         )
-        citations = [{"type": item["source_type"], "id": item["source_id"], "title": item["title"]} for item in results]
+        answer = (
+            "No evidence matched this query."
+            if not results
+            else "\n".join(
+                f"- [{item['source_type']}] {item['title']}: {item['snippet']}"
+                for item in results
+            )
+        )
+        citations = [
+            {
+                "type": item["source_type"],
+                "id": item["source_id"],
+                "title": item["title"],
+            }
+            for item in results
+        ]
         record_recall_event(
             self.db,
             repo_id=self.repo_id,
@@ -1357,20 +1905,38 @@ class MemoryTools:
         )
         return {
             "route": "memory_search",
-            "tool_calls": [{"tool_name": "search_evidence", "arguments": {"query": query}, "status": "success"}],
+            "tool_calls": [
+                {
+                    "tool_name": "search_evidence",
+                    "arguments": {"query": query},
+                    "status": "success",
+                }
+            ],
             "answer": answer,
             "citations": citations,
             "results": results,
         }
 
-    async def get_thread_context(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-        keyword = str(input_data.get("keyword") or input_data.get("query") or "").strip().lower()
+    async def get_thread_context(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
+        keyword = (
+            str(input_data.get("keyword") or input_data.get("query") or "")
+            .strip()
+            .lower()
+        )
         limit = min(max(int(input_data.get("limit") or 30), 1), 100)
         message_id = self._uuid_or_none(input_data.get("message_id"))
-        before_message_id = self._uuid_or_none(input_data.get("before_message_id"))
-        after_message_id = self._uuid_or_none(input_data.get("after_message_id"))
+        before_message_id = self._uuid_or_none(
+            input_data.get("before_message_id")
+        )
+        after_message_id = self._uuid_or_none(
+            input_data.get("after_message_id")
+        )
         offset = max(int(input_data.get("offset") or 0), 0)
-        max_chars = min(max(int(input_data.get("max_chars") or 6000), 200), 16000)
+        max_chars = min(
+            max(int(input_data.get("max_chars") or 6000), 200), 16000
+        )
 
         store = MessageStore(self.db)
         if message_id:
@@ -1380,11 +1946,19 @@ class MemoryTools:
                     _repo_filter(ChatMessage, self.repo_id),
                     _conversation_filter(ChatMessage, self.conversation_id),
                     ChatMessage.id == message_id,
-                    ChatMessage.role.in_(["user", "assistant", "tool", "tool_result"]),
+                    ChatMessage.role.in_(
+                        ["user", "assistant", "tool", "tool_result"]
+                    ),
                 )
                 .one_or_none()
             )
-            messages = [message] if message and (message.meta or {}).get("subtype") != "preserved_after_compact" else []
+            messages = (
+                [message]
+                if message
+                and (message.meta or {}).get("subtype")
+                != "preserved_after_compact"
+                else []
+            )
         else:
             messages = store.timeline(
                 self.repo_id,
@@ -1395,7 +1969,11 @@ class MemoryTools:
             )
             if keyword:
                 terms = _tokens(keyword)
-                messages = [msg for msg in messages if any(term in msg.content.lower() for term in terms)]
+                messages = [
+                    msg
+                    for msg in messages
+                    if any(term in msg.content.lower() for term in terms)
+                ]
             messages = messages[-limit:]
 
         lines: list[str] = []
@@ -1409,14 +1987,23 @@ class MemoryTools:
                 continue
             chunk_end = chunk_offset + len(chunk)
             truncated = chunk_end < len(content)
-            created_at = message.created_at.isoformat() if message.created_at else ""
+            created_at = (
+                message.created_at.isoformat() if message.created_at else ""
+            )
             lines.append(
-                f"[message_id={message.id} role={message.role} created_at={created_at} chars={chunk_offset}:{chunk_end}/{len(content)}]"
+                (
+                    f"[message_id={message.id} role={message.role} created_at="
+                    f"{created_at} chars={chunk_offset}:{chunk_end}/"
+                    f"{len(content)}]"
+                )
             )
             lines.append(chunk)
             if truncated:
                 lines.append(
-                    f"[内容未读完；继续调用 message_id={message.id}, offset={chunk_end}]"
+                    (
+                        f"[内容未读完；继续调用 message_id={message.id}, "
+                        f"offset={chunk_end}]"
+                    )
                 )
             results.append(
                 {
@@ -1439,7 +2026,11 @@ class MemoryTools:
                 break
 
         citations = [
-            {"type": "chat_message", "id": item["source_id"], "title": item["title"]}
+            {
+                "type": "chat_message",
+                "id": item["source_id"],
+                "title": item["title"],
+            }
             for item in results
         ]
         record_recall_event(
@@ -1455,45 +2046,79 @@ class MemoryTools:
             metadata={
                 "limit": limit,
                 "message_id": str(message_id) if message_id else None,
-                "before_message_id": str(before_message_id) if before_message_id else None,
-                "after_message_id": str(after_message_id) if after_message_id else None,
+                "before_message_id": str(before_message_id)
+                if before_message_id
+                else None,
+                "after_message_id": str(after_message_id)
+                if after_message_id
+                else None,
                 "offset": offset,
                 "max_chars": max_chars,
             },
         )
         return {
             "route": "thread_context",
-            "tool_calls": [{"tool_name": "get_thread_context", "arguments": {"keyword": keyword, "message_id": str(message_id or "")}, "status": "success"}],
-            "answer": "\n".join(lines) if lines else "当前会话还没有匹配的消息。",
+            "tool_calls": [
+                {
+                    "tool_name": "get_thread_context",
+                    "arguments": {
+                        "keyword": keyword,
+                        "message_id": str(message_id or ""),
+                    },
+                    "status": "success",
+                }
+            ],
+            "answer": "\n".join(lines)
+            if lines
+            else "当前会话还没有匹配的消息。",
             "citations": citations,
             "results": results,
         }
 
-    async def read_session_events(self, input_data: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    async def read_session_events(
+        self, input_data: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         session_id = input_data.get("session_id")
         include_transcript = bool(input_data.get("include_transcript", True))
         offset = max(int(input_data.get("offset") or 0), 0)
-        max_chars = min(max(int(input_data.get("max_chars") or 8000), 400), 20000)
-        query = self.db.query(ChatSession).filter(
-            _repo_filter(ChatSession, self.repo_id),
-            _conversation_filter(ChatSession, self.conversation_id),
-        ).order_by(ChatSession.created_at.desc())
+        max_chars = min(
+            max(int(input_data.get("max_chars") or 8000), 400), 20000
+        )
+        query = (
+            self.db.query(ChatSession)
+            .filter(
+                _repo_filter(ChatSession, self.repo_id),
+                _conversation_filter(ChatSession, self.conversation_id),
+            )
+            .order_by(ChatSession.created_at.desc())
+        )
         if session_id:
             parsed_session_id = self._uuid_or_none(session_id)
             if parsed_session_id is None:
                 sessions = []
             else:
-                sessions = query.filter(ChatSession.id == parsed_session_id).limit(1).all()
+                sessions = (
+                    query.filter(ChatSession.id == parsed_session_id)
+                    .limit(1)
+                    .all()
+                )
         else:
-            sessions = query.limit(min(max(int(input_data.get("limit") or 5), 1), 20)).all()
+            sessions = query.limit(
+                min(max(int(input_data.get("limit") or 5), 1), 20)
+            ).all()
         lines: list[str] = []
         results: list[dict[str, Any]] = []
         remaining_chars = max_chars
         for session in sessions:
-            header = f"Session {session.id} route={session.route} sealed_at={session.sealed_at}"
+            header = (
+                f"Session {session.id} route={session.route} sealed_at="
+                f"{session.sealed_at}"
+            )
             payload = session.digest
             if include_transcript:
-                payload += "\ntranscript=" + dumps_compact(session.transcript_json or {})
+                payload += "\ntranscript=" + dumps_compact(
+                    session.transcript_json or {}
+                )
             chunk_offset = offset if session_id else 0
             chunk = payload[chunk_offset : chunk_offset + remaining_chars]
             chunk_end = chunk_offset + len(chunk)
@@ -1502,7 +2127,10 @@ class MemoryTools:
             lines.append(chunk)
             if truncated:
                 lines.append(
-                    f"[会话记录未读完；继续调用 session_id={session.id}, offset={chunk_end}。]"
+                    (
+                        f"[会话记录未读完；继续调用 session_id={session.id}, "
+                        f"offset={chunk_end}。]"
+                    )
                 )
             results.append(
                 {
@@ -1511,7 +2139,9 @@ class MemoryTools:
                     "source_id": str(session.id),
                     "snippet": chunk,
                     "metadata": {
-                        "sealed_at": session.sealed_at.isoformat() if session.sealed_at else None,
+                        "sealed_at": session.sealed_at.isoformat()
+                        if session.sealed_at
+                        else None,
                         "include_transcript": include_transcript,
                         "offset": chunk_offset,
                         "next_offset": chunk_end if truncated else None,
@@ -1524,7 +2154,11 @@ class MemoryTools:
             if remaining_chars <= 0:
                 break
         citations = [
-            {"type": "session", "id": item["source_id"], "title": item["title"]}
+            {
+                "type": "session",
+                "id": item["source_id"],
+                "title": item["title"],
+            }
             for item in results
         ]
         record_recall_event(
@@ -1537,12 +2171,24 @@ class MemoryTools:
             citations=citations,
             scope="conversation",
             mode="sealed_transcript",
-            metadata={"include_transcript": include_transcript, "offset": offset, "max_chars": max_chars},
+            metadata={
+                "include_transcript": include_transcript,
+                "offset": offset,
+                "max_chars": max_chars,
+            },
         )
         return {
             "route": "session_events",
-            "tool_calls": [{"tool_name": "read_session_events", "arguments": {"session_id": str(session_id or "")}, "status": "success"}],
-            "answer": "\n\n".join(lines) if lines else "No sealed sessions found yet.",
+            "tool_calls": [
+                {
+                    "tool_name": "read_session_events",
+                    "arguments": {"session_id": str(session_id or "")},
+                    "status": "success",
+                }
+            ],
+            "answer": "\n\n".join(lines)
+            if lines
+            else "No sealed sessions found yet.",
             "citations": citations,
             "results": results,
         }

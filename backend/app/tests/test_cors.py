@@ -26,7 +26,9 @@ def test_dev_cors_preflight_allows_local_and_lan_origins() -> None:
     ):
         response = _preflight(origin)
 
-        assert response.status_code == 200, f"{origin}: {response.status_code} {response.text}"
+        assert response.status_code == 200, (
+            f"{origin}: {response.status_code} {response.text}"
+        )
         assert response.headers.get("access-control-allow-origin") == origin
 
 

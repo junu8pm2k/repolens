@@ -506,7 +506,7 @@ class ContextAssembler:
         )
         retrieval_policy = pre_retrieval_policy(current_message)
         evidence = EvidenceStore(self.db).search(repo_id, conversation_id, current_message, limit=8) if retrieval_policy["enabled"] else []
-        history_fetch_limit = max(limit, 30)
+        history_fetch_limit = max(limit, min(500, max(30, budget.recent_tokens // 256)))
         recent = [] if retrieval_policy["reason"] == "social_message" else message_store.recent(repo_id, conversation_id, limit=history_fetch_limit)
         raw_history = [
             {

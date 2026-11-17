@@ -1,5 +1,8 @@
 import uuid
 from types import SimpleNamespace
+import pytest
+
+from app.core.config import settings
 
 from app.services.chat_memory import ProgressiveContextManager
 from app.services.context_compression import (
@@ -10,11 +13,34 @@ from app.services.context_compression import (
     compress_retrieval_results,
     ensure_compaction_summary_preserves_key_facts,
     estimate_tokens,
+    default_context_budget,
+    effective_context_window_tokens,
+    model_context_window_tokens,
+    model_output_window_tokens,
     fallback_memory_update,
     messages_after_compact_boundary,
     merge_memory,
     microcompact_messages,
 )
+
+
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"])
+def test_deepseek_models_use_the_verified_provider_window(model, monkeypatch):
+    monkeypatch.setattr(settings, "context_model_window_tokens", None)
+    monkeypatch.setattr(settings, "context_max_input_tokens", 24000)
+    monkeypatch.setattr(settings, "context_dynamic_model_window_enabled", True)
+    assert model_context_window_tokens(model) == 1_048_576
+    assert model_output_window_tokens(model) == 393_216
+    assert default_context_budget(model).recent_tokens > 200_000
+    assert effective_context_window_tokens(model, for_compaction=True) > 1_000_000
+
+
+def test_long_message_is_preserved_in_full_when_it_fits_the_history_budget():
+    content = "这是需要保留的完整历史原文。" * 400 + "末尾的重要决定：保留原始记录。"
+    messages, stats = compress_messages([{"role": "user", "content": content}], max_tokens=10000)
+    assert messages[0]["content"] == content
+    assert stats["truncated_messages"] == 0
+    assert stats["exact_suffix_messages"] == 1
 
 
 def test_compress_messages_keeps_recent_turns_under_budget() -> None:

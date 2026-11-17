@@ -5,6 +5,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+
 from app.db.models import ChatMessage, ChatSession, Conversation, RecallEvent, Repository
 from app.db.session import Base
 from app.services.chat_memory import (
@@ -68,6 +70,22 @@ def test_greeting_does_not_reactivate_an_old_investigation():
     assembled = ContextAssembler(db).assemble(repo, conversation, "你好")
     assert assembled.history_messages == []
     assert "旧 CI" not in assembled.system_context
+    db.close()
+
+
+def test_large_window_preserves_more_than_thirty_history_messages(monkeypatch):
+    db = _db()
+    repo, conversation = _scope(db)
+    monkeypatch.setattr(settings, "context_model_window_tokens", 1_048_576)
+    monkeypatch.setattr(settings, "context_dynamic_model_window_enabled", True)
+    monkeypatch.setattr(EvidenceStore, "search", lambda *args, **kwargs: [])
+    for index in range(80):
+        db.add(ChatMessage(repo_id=repo.id, conversation_id=conversation.id,
+                           role="user" if index % 2 == 0 else "assistant", content=f"Historical turn {index}"))
+    db.flush()
+    assembled = ContextAssembler(db).assemble(repo, conversation, "回顾这个会话讨论过的内容")
+    assert len(assembled.history_messages) == 80
+    assert assembled.compression_stats["history_coverage"]["complete_and_exact"] is True
     db.close()
 
 

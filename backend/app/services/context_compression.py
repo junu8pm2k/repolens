@@ -11,7 +11,10 @@ WORD_PATTERN = re.compile(r"[a-zA-Z0-9_\-\u4e00-\u9fff]+")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?\n\u3002\uff01\uff1f])\s+")
 
 MODEL_CONTEXT_WINDOWS = {
-    "deepseek-v4-pro": 1_000_000,
+    # Verified against the provider's /models metadata (input + output tokens).
+    "deepseek-flash": 1_048_576,
+    "deepseek-v4-flash": 1_048_576,
+    "deepseek-v4-pro": 1_048_576,
     "gpt-4o": 128_000,
     "gpt-4o-mini": 128_000,
     "gpt-4.1": 1_000_000,
@@ -32,7 +35,9 @@ MODEL_CONTEXT_WINDOWS = {
 }
 
 MODEL_OUTPUT_WINDOWS = {
-    "deepseek-v4-pro": 384_000,
+    "deepseek-flash": 393_216,
+    "deepseek-v4-flash": 393_216,
+    "deepseek-v4-pro": 393_216,
     "gpt-4o": 16_384,
     "gpt-4o-mini": 16_384,
     "gpt-4.1": 32_768,
@@ -429,10 +434,12 @@ def compress_messages(messages: list[dict[str, Any]], max_tokens: int) -> tuple[
         content = str(message.get("content") or "")
         if role not in {"user", "assistant"} or not content.strip():
             continue
-        per_message_budget = max(96, min(900, max_tokens // 3))
-        clipped = clip_to_token_budget(content, per_message_budget)
+        remaining = max_tokens - used - estimate_tokens(role)
+        if remaining <= 0:
+            break
+        clipped = clip_to_token_budget(content, remaining)
         cost = estimate_tokens(role) + estimate_tokens(clipped)
-        if kept_reversed and used + cost > max_tokens:
+        if not clipped or used + cost > max_tokens:
             break
         kept_reversed.append({"role": role, "content": clipped})
         if clipped == content.strip():

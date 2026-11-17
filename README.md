@@ -98,6 +98,12 @@ npm run dev
 
 停止脚本会校验进程启动时间并结束整个进程树，重复执行也不会报找不到 PID；Docker 基础设施保持运行。如果终端已经位于 `scripts` 目录，使用 `.\start_rag.ps1` 和 `.\stop_rag.ps1`。
 
+## 模型上下文窗口
+
+`CONTEXT_DYNAMIC_MODEL_WINDOW_ENABLED=true` 时，系统按 `LLM_MODEL` 识别模型窗口，`CONTEXT_MAX_INPUT_TOKENS` 作为未知模型的回退预算。`deepseek-flash`、兼容别名 `deepseek-v4-flash` 与 `deepseek-v4-pro` 按 DeepSeek `/models` 元数据使用 **1,048,576 tokens** 的总窗口；`CONTEXT_MODEL_WINDOW_TOKENS=0` 表示自动识别，也可为自定义接口设置明确的窗口上限。
+
+总窗口包括输入和输出。当前配置为正式压缩预留 12,000 tokens，诊断中的有效窗口为 **1,036,576 tokens**；最近历史按预算比例分配，默认约 **230k tokens**，不是固定 6k。窗口有空间时保留完整消息，按预算读取最多 500 条活跃历史；超出预算或压缩边界以前的原文仍通过历史工具回查。配置变化在重启后生效，已有消息保存的历史诊断不会被重写。
+
 ## RAG 知识问答系统
 
 项目内置了与第 7.1 节流程一一对应的完整 RAG 系统：知识库创建向导、文档解析、段落感知切片、Embedding、向量/关键词混合检索、重排、召回测试、问答工作室、上下文组装、基于证据生成和编号引用。支持 TXT、Markdown、PDF、DOCX、JSON、CSV 与日志文件；重复文件会按 SHA-256 跳过。

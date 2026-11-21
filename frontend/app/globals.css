@@ -198,23 +198,37 @@ pre {
   background: #fbfcfd;
 }
 
-.analysis-overlay {
+:is(.analysis-overlay, .markdown-document) {
   overflow-wrap: anywhere;
 }
 
-.analysis-overlay .markdown-body {
+:is(.analysis-overlay, .markdown-document) .markdown-body {
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
-.analysis-overlay :where(pre, .markdown-table-wrap) {
+:is(.analysis-overlay, .markdown-document) :where(pre, .markdown-table-wrap) {
   min-width: 0;
   max-width: 100%;
 }
 
-.analysis-overlay pre {
+:is(.analysis-overlay, .markdown-document) pre {
   overflow-x: auto;
   overflow-wrap: normal;
   white-space: pre;
   word-break: normal;
+}
+
+:is(.analysis-overlay, .markdown-document) .markdown-body :where(th, td) {
+  min-width: 7rem;
+  max-width: 28rem;
+}
+
+.markdown-document .markdown-body a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.markdown-document .task-list-item {
+  list-style: none;
 }

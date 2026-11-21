@@ -83,7 +83,7 @@ function section(level: 2 | 3, title: string, ...body: (string | undefined)[]): 
   return content ? `${"#".repeat(level)} ${title}\n\n${content}` : "";
 }
 
-function codeBlock(content: string): string {
+export function markdownCodeBlock(content: string): string {
   const longestBackticks = (content.match(/`{3,}/g) ?? []).reduce((max, run) => Math.max(max, run.length), 2);
   const fence = "`".repeat(longestBackticks + 1);
   return `${fence}text\n${content}${content.endsWith("\n") ? "" : "\n"}${fence}`;
@@ -149,7 +149,7 @@ export function ciAnalysisMarkdown(title: string, result: CIAnalysisResult): str
     section(2, "排查计划与执行",
       section(3, "计划", bullets(result.plan)),
       section(3, "已执行", bullets(result.executed_steps))),
-    section(2, "首个关键错误块", result.first_error ? codeBlock(result.first_error) : undefined),
+    section(2, "首个关键错误块", result.first_error ? markdownCodeBlock(result.first_error) : undefined),
     section(2, "根因与修复",
       section(3, "可能原因", bullets(result.possible_causes)),
       section(3, "修复步骤", bullets(result.fix_steps)),

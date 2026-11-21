@@ -10,6 +10,7 @@ import {
   Cable,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock3,
   Database,
   FileText,
@@ -566,6 +567,8 @@ type PromptSuggestionState = {
 };
 const workspaceTabs = ["Issue", "PR", "CI", "记忆&知识库", "技能&MCP", "图谱"] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
+type WorkspaceListTab = "Issue" | "PR" | "CI";
+type WorkspaceStatusFilter = { repoId: string | undefined; tab: WorkspaceTab; value: string };
 const linkedWorkspaceTabs = new Map<string, WorkspaceTab>([
   ["issues", "Issue"],
   ["pull-requests", "PR"],
@@ -914,7 +917,7 @@ function WorkspaceDashboard() {
   const [workspaceWidth, setWorkspaceWidth] = useState(400);
   const [workspaceMaxWidth, setWorkspaceMaxWidth] = useState(WORKSPACE_MAX_WIDTH);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
-  const [workspaceStatus, setWorkspaceStatus] = useState("all");
+  const [workspaceStatusFilter, setWorkspaceStatusFilter] = useState<WorkspaceStatusFilter | null>(null);
   const [workspaceOwner, setWorkspaceOwner] = useState("all");
   const [workspaceTime, setWorkspaceTime] = useState("all");
   const [selectedWorkspaceItem, setSelectedWorkspaceItem] = useState<WorkspaceSelection | null>(null);
@@ -978,12 +981,17 @@ function WorkspaceDashboard() {
   const autoCollapsedSidebarRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const workspacePanelRef = useRef<HTMLDivElement>(null);
   const promptRowRef = useRef<HTMLDivElement>(null);
   const promptMeasureRef = useRef<HTMLDivElement>(null);
   const activeRepositoryId = useRef("");
   const [visiblePromptCount, setVisiblePromptCount] = useState(5);
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0], [repos, selectedRepoId]);
+  const workspaceRepoId = selectedRepo?.id;
+  const workspaceStatus = workspaceStatusFilter?.repoId === workspaceRepoId && workspaceStatusFilter?.tab === workspaceTab
+    ? workspaceStatusFilter.value
+    : "all";
   const hasRepository = Boolean(selectedRepo);
   useEffect(() => {
     setWorkspaceTab(linkedWorkspaceTabs.get(view ?? "") ?? "Issue");
@@ -1700,7 +1708,7 @@ function WorkspaceDashboard() {
 
   useEffect(() => {
     setWorkspaceQuery("");
-    setWorkspaceStatus("all");
+    setWorkspaceStatusFilter((current) => current?.repoId === workspaceRepoId && current?.tab === workspaceTab ? current : null);
     setWorkspaceOwner("all");
     setWorkspaceTime("all");
     if (preserveWorkspaceSelectionRef.current) {
@@ -1718,7 +1726,7 @@ function WorkspaceDashboard() {
     setAnalysisModalRunId(null);
     setCiAnalysisError(null);
     setCollapsedGroups({});
-  }, [selectedRepo?.id, workspaceTab]);
+  }, [workspaceRepoId, workspaceTab]);
 
   useEffect(() => {
     const node = chatScrollRef.current;
@@ -2460,7 +2468,7 @@ function WorkspaceDashboard() {
         const people = [...(issue.assignees ?? []), issue.author ?? ""];
         return (
           matchesQuery(workspaceQuery, [issue.title, issue.body, issue.state, ...(issue.labels ?? [])]) &&
-          matchesStatus(workspaceStatus, issue.state) &&
+          matchesIssueStatus(workspaceStatus, issue) &&
           matchesOwner(workspaceOwner, people) &&
           matchesTime(workspaceTime, issue.updated_at ?? issue.created_at)
         );
@@ -2497,11 +2505,11 @@ function WorkspaceDashboard() {
   );
 
   const openIssues = issues.filter((item) => item.state === "open");
-  const openPrs = prs.filter((item) => item.state === "open");
-  const failedRuns = runs.filter((item) => item.conclusion === "failure");
+  const openPrs = prs.filter((item) => item.state === "open" && !item.merged_at);
+  const failedRuns = runs.filter((item) => (item.conclusion ?? item.status) === "failure");
   const mergedPrs = prs.filter((item) => item.merged_at);
-  const rejectedIssues = issues.filter((item) => classifyIssue(item) === "rejected");
-  const handledIssues = issues.filter((item) => ["accepted", "closed"].includes(classifyIssue(item)));
+  const rejectedIssues = issues.filter((item) => matchesIssueStatus("rejected", item));
+  const handledIssues = issues.filter((item) => matchesIssueStatus("handled", item));
   const selectedIssue = selectedWorkspaceItem?.type === "issue" ? issues.find((item) => item.id === selectedWorkspaceItem.id) : undefined;
   const selectedPr = selectedWorkspaceItem?.type === "pr" ? prs.find((item) => item.id === selectedWorkspaceItem.id) : undefined;
   const selectedRun = selectedWorkspaceItem?.type === "ci" ? runs.find((item) => item.id === selectedWorkspaceItem.id) : undefined;
@@ -2513,6 +2521,25 @@ function WorkspaceDashboard() {
   const indexSnoozed = Boolean(
     selectedProjectIndexState?.snoozed_until && new Date(selectedProjectIndexState.snoozed_until).getTime() > Date.now()
   );
+  const metrics: Array<{ icon: LucideIcon; label: string; value: number; tab: WorkspaceListTab; status: string }> = [
+    { icon: ListTodo, label: "待处理 Issue", value: openIssues.length, tab: "Issue", status: "open" },
+    { icon: GitPullRequest, label: "待 Review", value: openPrs.length, tab: "PR", status: "open" },
+    { icon: CheckCircle2, label: "已处理 Issue", value: handledIssues.length, tab: "Issue", status: "handled" },
+    { icon: XCircle, label: "已拒绝 Issue", value: rejectedIssues.length, tab: "Issue", status: "rejected" },
+    { icon: AlertTriangle, label: "失败 CI", value: failedRuns.length, tab: "CI", status: "failure" },
+    { icon: CheckCircle2, label: "已合并 PR", value: mergedPrs.length, tab: "PR", status: "merged" }
+  ];
+
+  function openWorkspaceList(tab: WorkspaceListTab, status: string) {
+    setWorkspaceTab(tab);
+    setWorkspaceStatusFilter({ repoId: workspaceRepoId, tab, value: status });
+    setWorkspaceQuery("");
+    setWorkspaceOwner("all");
+    setWorkspaceTime("all");
+    setCollapsedGroups({});
+    setSelectedWorkspaceItem(null);
+    workspacePanelRef.current?.scrollTo({ top: 0 });
+  }
 
   return (
     <div
@@ -2698,12 +2725,18 @@ function WorkspaceDashboard() {
             </div>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 2xl:grid-cols-6">
-            <MetricCard icon={ListTodo} label="待处理 Issue" value={openIssues.length} />
-            <MetricCard icon={GitPullRequest} label="待 Review" value={openPrs.length} />
-            <MetricCard icon={CheckCircle2} label="已处理 Issue" value={handledIssues.length} />
-            <MetricCard icon={XCircle} label="已拒绝 Issue" value={rejectedIssues.length} />
-            <MetricCard icon={AlertTriangle} label="失败 CI" value={failedRuns.length} tone="danger" />
-            <MetricCard icon={CheckCircle2} label="已合并 PR" value={mergedPrs.length} />
+            {metrics.map(({ icon, label, value, tab, status }) => (
+              <MetricCard
+                key={label}
+                icon={icon}
+                label={label}
+                value={value}
+                danger={tab === "CI"}
+                active={workspaceTab === tab && workspaceStatus === status && !hasWorkspaceDetail}
+                disabled={!selectedRepo}
+                onClick={() => openWorkspaceList(tab, status)}
+              />
+            ))}
           </div>
         </section>
 
@@ -2712,12 +2745,7 @@ function WorkspaceDashboard() {
         <aside className="col-start-3 row-span-2 row-start-1 flex min-h-0 min-w-0 flex-col bg-white">
           <div className="border-b border-line bg-white px-4 pb-2 pt-3">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <h2 className="text-base font-semibold tracking-tight text-ink">Workspace</h2>
-                <span className="truncate text-[11px] text-slate-400">
-                  Issues {filteredIssues.length} · PRs {filteredPrs.length}
-                </span>
-              </div>
+              <h2 className="text-base font-semibold tracking-tight text-ink">Workspace</h2>
               <button
                 onClick={refreshSelectedRepo}
                 disabled={!selectedRepo || syncing}
@@ -2753,7 +2781,7 @@ function WorkspaceDashboard() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <div id="workspace-panel" ref={workspacePanelRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           {!hasWorkspaceDetail && (workspaceTab === "Issue" || workspaceTab === "PR" || workspaceTab === "CI") && (
             <WorkspaceControls
               query={workspaceQuery}
@@ -2767,7 +2795,7 @@ function WorkspaceDashboard() {
                 setSelectedWorkspaceItem(null);
               }}
               onStatusChange={(value) => {
-                setWorkspaceStatus(value);
+                setWorkspaceStatusFilter({ repoId: workspaceRepoId, tab: workspaceTab, value });
                 setSelectedWorkspaceItem(null);
               }}
               onOwnerChange={(value) => {
@@ -2798,8 +2826,10 @@ function WorkspaceDashboard() {
 
           {!hasWorkspaceDetail && workspaceTab === "Issue" && (
             <div className="mt-4 space-y-3">
+              {filteredIssues.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 Issue" />}
               {issueCategoryMeta.map((category) => {
                 const items = filteredIssues.filter((item) => classifyIssue(item) === category.key);
+                if (items.length === 0 && (workspaceStatus !== "all" || filteredIssues.length === 0)) return null;
                 const groupKey = `issue-${category.key}`;
                 return (
                   <CategoryGroup
@@ -2826,8 +2856,10 @@ function WorkspaceDashboard() {
 
           {!hasWorkspaceDetail && workspaceTab === "PR" && (
             <div className="mt-4 space-y-3">
+              {filteredPrs.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 PR" />}
               {prCategoryMeta.map((category) => {
                 const items = filteredPrs.filter((item) => classifyPr(item) === category.key);
+                if (items.length === 0 && (workspaceStatus !== "all" || filteredPrs.length === 0)) return null;
                 const groupKey = `pr-${category.key}`;
                 return (
                   <CategoryGroup
@@ -2854,7 +2886,7 @@ function WorkspaceDashboard() {
 
           {!hasWorkspaceDetail && workspaceTab === "CI" && (
             <div className="mt-4 space-y-2">
-              {filteredRuns.length === 0 && <EmptyWorkspaceState label="暂无 Workflow Run" />}
+              {filteredRuns.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 Workflow Run" />}
               {filteredRuns.map((item) => (
                 <WorkspaceItemButton
                   key={item.id}
@@ -4422,24 +4454,40 @@ function MetricCard({
   icon: Icon,
   label,
   value,
-  tone = "default"
+  danger,
+  active,
+  disabled,
+  onClick
 }: {
   icon: LucideIcon;
   label: string;
   value: number;
-  tone?: "default" | "danger";
+  danger: boolean;
+  active: boolean;
+  disabled: boolean;
+  onClick: () => void;
 }) {
-  const iconTone = tone === "danger" && value > 0 ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
+  const iconTone = danger && value > 0 ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
   return (
-    <div className="flex items-center gap-2.5 rounded-lg border border-line bg-white px-3 py-2.5 shadow-xs">
+    <button
+      type="button"
+      aria-controls="workspace-panel"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left shadow-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 disabled:opacity-60 ${
+        active ? "border-indigo-300 bg-accent-soft" : "border-line bg-white enabled:hover:border-indigo-200 enabled:hover:bg-panel"
+      }`}
+    >
       <span className={`grid h-7 w-7 shrink-0 place-items-center rounded-md ${iconTone}`}>
         <Icon className="h-3.5 w-3.5" />
       </span>
-      <div className="min-w-0">
-        <div className="truncate text-[11px] leading-4 text-slate-500">{label}</div>
-        <div className="mt-0.5 text-lg font-semibold leading-none tracking-tight text-ink">{value}</div>
-      </div>
-    </div>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11px] leading-4 text-slate-500">{label}</span>
+        <span className="mt-0.5 block text-lg font-semibold leading-none tracking-tight text-ink">{value}</span>
+      </span>
+      <ChevronRight aria-hidden="true" className="hidden h-3.5 w-3.5 shrink-0 text-indigo-500 sm:block 2xl:hidden" />
+    </button>
   );
 }
 
@@ -4482,9 +4530,11 @@ function WorkspaceControls({
           <option value="all">全部状态</option>
           <option value="open">open</option>
           <option value="closed">closed</option>
-          {activeTab === "PR" && <option value="merged">merged</option>}
-          {activeTab === "CI" && <option value="failure">failure</option>}
-          {activeTab === "CI" && <option value="success">success</option>}
+          {activeTab === "Issue" && <option value="handled">已处理</option>}
+          {activeTab === "Issue" && <option value="rejected">已拒绝</option>}
+          {activeTab === "PR" && <option value="merged">已合并</option>}
+          {activeTab === "CI" && <option value="failure">失败</option>}
+          {activeTab === "CI" && <option value="success">成功</option>}
         </SelectFilter>
         <SelectFilter value={owner} onChange={onOwnerChange} label="负责人" disabled={activeTab === "CI"}>
           <option value="all">全部负责人</option>
@@ -5835,12 +5885,21 @@ function classifyIssue(issue: Issue) {
 }
 
 function classifyPr(pr: PullRequest) {
-  const text = `${pr.title} ${pr.body ?? ""} ${(pr.files ?? []).map((file) => file.patch ?? file.filename).join(" ")}`.toLowerCase();
-  if (pr.state === "closed" && !pr.merged_at) return "rejected";
-  if (text.includes("conflict")) return "conflict";
   if (pr.merged_at) return "done";
+  const text = `${pr.title} ${pr.body ?? ""} ${(pr.files ?? []).map((file) => file.patch ?? file.filename).join(" ")}`.toLowerCase();
+  if (pr.state === "closed") return "rejected";
+  if (text.includes("conflict")) return "conflict";
   if (!pr.author) return "needsOwner";
   return "reviewing";
+}
+
+function matchesIssueStatus(filter: string, issue: Issue) {
+  if (filter === "handled") {
+    const category = classifyIssue(issue);
+    return category === "accepted" || category === "closed";
+  }
+  if (filter === "rejected") return classifyIssue(issue) === "rejected";
+  return matchesStatus(filter, issue.state);
 }
 
 function matchesQuery(query: string, values: Array<string | null | undefined>) {

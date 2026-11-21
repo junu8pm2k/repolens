@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock3,
+  Copy,
   Database,
   FileText,
   Folder,
@@ -3889,6 +3890,7 @@ function AnalysisOverlay({
   title,
   trace,
   loading,
+  canCopy,
   onRetry,
   onClose,
   children
@@ -3897,10 +3899,13 @@ function AnalysisOverlay({
   title: string;
   trace: React.ComponentProps<typeof AgentTraceAside>;
   loading: boolean;
+  canCopy: boolean;
   onRetry: () => void;
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const resultRef = useRef<HTMLElement>(null);
+
   return (
     <div
       role="dialog"
@@ -3916,7 +3921,13 @@ function AnalysisOverlay({
             </div>
             <h3 className="mt-1 max-h-[20dvh] overflow-y-auto text-base font-semibold tracking-tight text-ink">{title}</h3>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {canCopy && !loading && (
+              <CopyAnalysisButton
+                key={title}
+                getText={() => `${title}\n\n${resultRef.current?.innerText.trim() ?? ""}`}
+              />
+            )}
             <button
               type="button"
               onClick={onRetry}
@@ -3931,12 +3942,43 @@ function AnalysisOverlay({
             </button>
           </div>
         </header>
-        <section aria-label="分析结果" tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
+        <section ref={resultRef} aria-label="分析结果" tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
           {children}
         </section>
       </section>
       <AgentTraceAside {...trace} />
     </div>
+  );
+}
+
+function CopyAnalysisButton({ getText }: { getText: () => string }) {
+  const [feedback, setFeedback] = useState("");
+
+  async function copyAnalysis() {
+    setFeedback("");
+    try {
+      await navigator.clipboard.writeText(getText());
+      setFeedback("已复制");
+    } catch {
+      setFeedback("复制失败");
+    }
+  }
+
+  const Icon = feedback === "已复制" ? CheckCircle2 : Copy;
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="复制分析结果"
+        onClick={copyAnalysis}
+        className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700"
+      >
+        <Icon aria-hidden="true" className="h-3.5 w-3.5" />
+        {feedback || "复制"}
+      </button>
+      <span role="status" className="sr-only">{feedback}</span>
+    </>
   );
 }
 
@@ -3972,6 +4014,7 @@ function IssueAnalysisOverlay({
         traceItems
       }}
       loading={loading}
+      canCopy={Boolean(analysis && !error)}
       onRetry={onRetry}
       onClose={onClose}
     >
@@ -4001,7 +4044,7 @@ function IssueAnalysisOverlay({
           <section className="rounded-xl border border-line bg-white p-4">
             <h4 className="text-sm font-semibold tracking-tight text-ink">建议负责人</h4>
             <p className="mt-2 text-sm leading-6 text-slate-700">
-              <span className="font-semibold text-ink">{analysis.suggested_owner}</span>
+              <span className="font-semibold text-ink">{analysis.suggested_owner}</span>{" "}
               <span className="ml-2">{analysis.owner_reason}</span>
             </p>
           </section>
@@ -4142,6 +4185,7 @@ function PRAnalysisOverlay({
         traceItems
       }}
       loading={loading}
+      canCopy={Boolean(analysis && !error)}
       onRetry={onRetry}
       onClose={onClose}
     >
@@ -4234,6 +4278,7 @@ function CIAnalysisOverlay({
         traceItems
       }}
       loading={loading}
+      canCopy={Boolean(analysis && !error)}
       onRetry={onRetry}
       onClose={onClose}
     >

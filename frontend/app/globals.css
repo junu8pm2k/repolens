@@ -197,3 +197,24 @@ pre {
 .markdown-body tr:nth-child(even) td {
   background: #fbfcfd;
 }
+
+.analysis-overlay {
+  overflow-wrap: anywhere;
+}
+
+.analysis-overlay .markdown-body {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+}
+
+.analysis-overlay :where(pre, .markdown-table-wrap) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.analysis-overlay pre {
+  overflow-x: auto;
+  overflow-wrap: normal;
+  white-space: pre;
+  word-break: normal;
+}

@@ -16,6 +16,8 @@ RepoLens AI 是一个面向 GitHub PR / Issue 研发协作的全栈 AI Agent 项
 - 生成工程周报。
 - 基础 Eval 覆盖 Issue 分类、PR 覆盖度、RAG 命中率、工具 schema 就绪度和结构化输出校验。
 
+从导航栏打开「Repos」，在对应仓库卡片中选择「负责人推荐」，可维护未分配 Issue 的候选成员。
+
 ## 技术栈
 
 - 后端：Python、FastAPI、Pydantic、SQLAlchemy、PostgreSQL、Milvus、httpx、LangChain。

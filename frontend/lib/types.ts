@@ -12,3 +12,11 @@ export type Repository = {
   default_branch?: string;
   last_sync_at?: string | null;
 };
+
+export type TeamMember = {
+  id: string;
+  name: string;
+  role: string;
+  strengths: string;
+  techStack: string;
+};

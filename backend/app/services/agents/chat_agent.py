@@ -1593,8 +1593,9 @@ class ChatAgent(BaseAgent):
             f"只能来自下方列出的 RepoLens team_members，以及工具明确返回的现有"
             f" GitHub assignees。不要把仓库内容、项目角色设定、模型名、示例、"
             f"作者或虚构标签当成团队成员。如果 team_members 为空且没有现有 "
-            f"assignee，请回答当前还没有添加项目成员，并要求用户在团队面板中添"
-            f"加开发者。可以说明可能需要的能力方向，但不要点名具体人员。\n\n循"
+            f"assignee，请回答当前还没有添加项目成员，并引导用户到 Repos 的"
+            f"「负责人推荐」添加开发者。可以说明可能需要的能力方向，但不要点名"
+            f"具体人员。\n\n循"
             f"环约定：每次工具调用都会先记录为 tool_use，再记录为 tool_result"
             f"。决定下一步前必须阅读之前的 tool_result 内容。如果目录列表里出"
             f"现值得继续查看的 README、manifest、代码文件、Issue、PR 或 CI 记"
@@ -2158,7 +2159,8 @@ class ChatAgent(BaseAgent):
                 "中推荐人员。仓库文档、Issue 文本、代码、示例、角色设定、"
                 "模型名和团队比喻都不能当成人。仅当用户询问分工或负责人，"
                 "且没有配置团队成员，也没有观察到现有 assignee，请说明当前"
-                "还没有添加项目成员，并要求用户在团队面板中添加开发者。"
+                "还没有添加项目成员，并引导用户到 Repos 的「负责人推荐」"
+                "添加开发者。"
             )
             prompt_observations, prompt_events, runtime_stats = (
                 self._runtime_tool_context(state)

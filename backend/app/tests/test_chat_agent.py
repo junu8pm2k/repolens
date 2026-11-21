@@ -1136,7 +1136,7 @@ async def test_final_prompt_scopes_candidates_to_team() -> None:
 
     assert "team_members: []" in prompt
     assert "团队比喻都不能当成人" in prompt
-    assert "在团队面板中添加开发者" in prompt
+    assert "到 Repos 的「负责人推荐」添加开发者" in prompt
 
 
 @pytest.mark.asyncio

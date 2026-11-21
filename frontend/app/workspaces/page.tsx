@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BarChart3, CalendarRange, FileText, Layers } from "lucide-react";
 
@@ -84,7 +85,15 @@ export default function WorkspacesPage() {
 
   return (
     <>
-      <PageTitle title="团队工作区" description="把多个仓库聚合成 workspace，生成跨仓库研发周报和风险概览。" />
+      <PageTitle
+        title="团队工作区"
+        description="把多个仓库聚合成 workspace，生成跨仓库研发周报和风险概览。"
+        actions={
+          <Link href="/reports" className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-medium text-slate-600 hover:bg-panel">
+            <FileText className="h-4 w-4" /> 单仓库周报
+          </Link>
+        }
+      />
 
       <div className="grid gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
         <Card className="self-start">

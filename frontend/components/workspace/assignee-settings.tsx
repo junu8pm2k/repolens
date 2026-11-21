@@ -1,44 +1,34 @@
 "use client";
 
-import { ArrowLeft, LoaderCircle, Plus } from "lucide-react";
-import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { LoaderCircle, Plus } from "lucide-react";
+import { useState, type FormEvent } from "react";
 
-import { Card, PageTitle, PrimaryButton } from "@/components/ui/card";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
-import type { Repository, TeamMember } from "@/lib/types";
+import { Card, PrimaryButton } from "@/components/ui/card";
+import type { TeamMember } from "@/lib/types";
 
 type Profile = Omit<TeamMember, "id">;
 
 const emptyProfile: Profile = { name: "", role: "", strengths: "", techStack: "" };
 const fieldClass = "mt-1.5 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 
-export default function AssigneeSettingsPage() {
-  const { id } = useParams<{ id: string }>();
-  return <AssigneeSettings key={id} repoId={id} />;
-}
-
-function AssigneeSettings({ repoId }: { repoId: string }) {
-  const membersUrl = `/api/repos/${encodeURIComponent(repoId)}/team-members`;
-  const [repoName, setRepoName] = useState("");
-  const [members, setMembers] = useState<TeamMember[] | null>(null);
+export function AssigneeSettings({
+  members,
+  loading,
+  loadError,
+  onSave,
+  onRemove,
+  onRetry
+}: {
+  members: TeamMember[];
+  loading: boolean;
+  loadError: string | null;
+  onSave: (profile: Profile) => Promise<void>;
+  onRemove: (memberId: string) => Promise<void>;
+  onRetry: () => void;
+}) {
   const [profile, setProfile] = useState(emptyProfile);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    let ignore = false;
-    apiGet<Repository[]>("/api/repos")
-      .then((repos) => {
-        if (!ignore) setRepoName(repos.find((repo) => repo.id === repoId)?.full_name ?? "");
-      })
-      .catch(() => undefined);
-    apiGet<TeamMember[]>(membersUrl)
-      .then((items) => { if (!ignore) setMembers(items); })
-      .catch((reason: Error) => { if (!ignore) setError(reason.message); });
-    return () => { ignore = true; };
-  }, [repoId, membersUrl]);
 
   async function saveMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -47,13 +37,12 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
     setSaving(true);
     setError("");
     try {
-      const member = await apiPost<TeamMember>(membersUrl, {
+      await onSave({
         name,
         role: profile.role.trim(),
         strengths: profile.strengths.trim(),
         techStack: profile.techStack.trim()
       });
-      setMembers((current) => [...(current ?? []).filter((item) => item.id !== member.id), member]);
       setProfile(emptyProfile);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "保存成员失败");
@@ -67,8 +56,7 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
     setSaving(true);
     setError("");
     try {
-      await apiDelete(`${membersUrl}/${encodeURIComponent(memberId)}`);
-      setMembers((current) => current?.filter((member) => member.id !== memberId) ?? null);
+      await onRemove(memberId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "移除成员失败");
     } finally {
@@ -77,28 +65,23 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
   }
 
   return (
-    <>
-      <PageTitle
-        title="负责人推荐"
-        description={repoName ? `${repoName} · 为未分配的 Issue 提供候选人，供人工分派时参考。` : "为未分配的 Issue 提供候选人，供人工分派时参考。"}
-        actions={
-          <Link href="/repos" className="inline-flex h-9 items-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-medium text-slate-600 hover:bg-panel">
-            <ArrowLeft className="h-4 w-4" /> 返回仓库管理
-          </Link>
-        }
-      />
-
-      {error && <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
-      {members === null && !error && (
+    <div className="space-y-3">
+      {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+      {loadError && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          <p role="alert">{loadError}</p>
+          <button type="button" onClick={onRetry} className="mt-1 font-medium underline">重新读取成员</button>
+        </div>
+      )}
+      {loading ? (
         <p role="status" className="flex items-center gap-2 text-sm text-slate-500">
           <LoaderCircle className="h-4 w-4 animate-spin" /> 正在读取成员资料…
         </p>
-      )}
-
-      {members !== null && (
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,4fr)]">
+      ) : (
+        <div className="space-y-3">
           <Card>
-            <h2 className="text-base font-semibold text-ink">添加成员</h2>
+            <h3 className="text-base font-semibold text-ink">负责人推荐</h3>
+            <p className="mt-1 text-xs leading-5 text-slate-500">为未分配的 Issue 提供候选人，供人工分派时参考。</p>
             <form onSubmit={saveMember} className="mt-4 space-y-3">
               <label className="block text-sm font-medium text-slate-700">
                 姓名
@@ -124,7 +107,7 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
 
           <Card>
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold text-ink">候选成员</h2>
+              <h3 className="text-sm font-semibold text-ink">候选成员</h3>
               <span className="text-sm text-slate-500">{members.length} 人</span>
             </div>
             {members.length === 0 ? (
@@ -134,7 +117,7 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
                 {members.map((member) => (
                   <li key={member.id} className="flex items-start justify-between gap-3 py-3">
                     <div className="min-w-0 space-y-1 break-words text-sm text-slate-600">
-                      <h3 className="font-medium text-ink">{member.name}</h3>
+                      <h4 className="font-medium text-ink">{member.name}</h4>
                       {member.role && <p>{member.role}</p>}
                       {member.strengths && <p>擅长方向 · {member.strengths}</p>}
                       {member.techStack && <p>技术栈 · {member.techStack}</p>}
@@ -149,6 +132,6 @@ function AssigneeSettings({ repoId }: { repoId: string }) {
           </Card>
         </div>
       )}
-    </>
+    </div>
   );
 }

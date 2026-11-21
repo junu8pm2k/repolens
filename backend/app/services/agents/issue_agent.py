@@ -305,12 +305,12 @@ class IssueAgent(BaseAgent):
                     "待分配",
                     (
                         f"当前项目还没有添加团队成员；这个 Issue 更像 {area} "
-                        f"方向，可到 Repos 的「负责人推荐」添加候选成员。"
+                        f"方向，可到 Workspace 的「团队」添加候选成员。"
                     ),
                 )
             return (
                 "待分配",
-                "当前项目还没有添加团队成员，可到 Repos 的「负责人推荐」"
+                "当前项目还没有添加团队成员，可到 Workspace 的「团队」"
                 "添加候选成员。",
             )
         if area != "待分配":

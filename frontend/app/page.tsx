@@ -37,6 +37,14 @@ import {
 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
+import {
+  ciAnalysisMarkdown,
+  issueAnalysisMarkdown,
+  prAnalysisMarkdown,
+  type CIAnalysisResult,
+  type IssueAnalysisResult,
+  type PRAnalysisResult
+} from "@/lib/analysis-markdown";
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import { modelInputDiagnostics } from "@/lib/context-diagnostics";
 import { graphViewBox, placeGraphLabels } from "@/lib/knowledge-graph-labels";
@@ -185,82 +193,14 @@ type PromptRecommendationsResponse = {
   suggestions: string[];
 };
 
-type DuplicateCandidate = {
-  issue_id: string;
-  title: string;
-  score: number;
-};
-
-type IssueEvidence = {
-  source_type: string;
-  title: string;
-  snippet: string;
-  reference?: string | null;
-  confidence?: number | null;
-};
-
-type IssueDrafts = {
-  clarification_comment?: string | null;
-  task_breakdown?: string | null;
-};
-
-type IssueAnalysisResult = {
-  summary: string;
-  conclusion: "进入开发" | "等待澄清" | "关闭" | "拆分" | "合并到已有 Issue" | string;
-  conclusion_reason: string;
-  category: string;
-  priority: "P0" | "P1" | "P2" | "P3" | string;
-  complexity: "S" | "M" | "L" | "XL" | string;
-  suggested_owner: string;
-  owner_reason: string;
-  duplicate_candidates?: DuplicateCandidate[];
-  evidence?: IssueEvidence[];
-  checklist?: string[];
-  action_items?: string[];
-  drafts?: IssueDrafts;
-  confidence: number;
-};
-
 type IssueAnalysisResponse = {
   analysis_id: string;
   result: IssueAnalysisResult;
 };
 
-type PRAnalysisResult = {
-  summary: string;
-  plan?: string[];
-  executed_steps?: string[];
-  merge_recommendation: "建议合入" | "修改后合入" | "暂缓" | "拒绝" | string;
-  recommendation_reason?: string;
-  key_changes?: string[];
-  risk_points?: string[];
-  blocking_issues?: string[];
-  review_checklist?: string[];
-  test_suggestions?: string[];
-  files_need_attention?: string[];
-  review_comments?: string[];
-  confidence: number;
-};
-
 type PRAnalysisResponse = {
   analysis_id: string;
   result: PRAnalysisResult;
-};
-
-type CIAnalysisResult = {
-  failure_summary: string;
-  failure_type: "test" | "build" | "lint" | "dependency" | "permission" | "environment" | "unknown" | string;
-  plan?: string[];
-  executed_steps?: string[];
-  first_error?: string | null;
-  root_cause?: string;
-  possible_causes?: string[];
-  fix_steps?: string[];
-  debug_steps?: string[];
-  related_files?: string[];
-  is_merge_blocking: boolean;
-  blocking_reason?: string;
-  confidence: number;
 };
 
 type CIAnalysisResponse = {
@@ -3890,7 +3830,7 @@ function AnalysisOverlay({
   title,
   trace,
   loading,
-  canCopy,
+  getMarkdown,
   onRetry,
   onClose,
   children
@@ -3899,13 +3839,11 @@ function AnalysisOverlay({
   title: string;
   trace: React.ComponentProps<typeof AgentTraceAside>;
   loading: boolean;
-  canCopy: boolean;
+  getMarkdown?: () => string;
   onRetry: () => void;
   onClose: () => void;
   children: React.ReactNode;
 }) {
-  const resultRef = useRef<HTMLElement>(null);
-
   return (
     <div
       role="dialog"
@@ -3922,12 +3860,7 @@ function AnalysisOverlay({
             <h3 className="mt-1 max-h-[20dvh] overflow-y-auto text-base font-semibold tracking-tight text-ink">{title}</h3>
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {canCopy && !loading && (
-              <CopyAnalysisButton
-                key={title}
-                getText={() => `${title}\n\n${resultRef.current?.innerText.trim() ?? ""}`}
-              />
-            )}
+            {getMarkdown && !loading && <CopyAnalysisButton key={title} getMarkdown={getMarkdown} />}
             <button
               type="button"
               onClick={onRetry}
@@ -3942,7 +3875,7 @@ function AnalysisOverlay({
             </button>
           </div>
         </header>
-        <section ref={resultRef} aria-label="分析结果" tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
+        <section aria-label="分析结果" tabIndex={0} className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-5 sm:py-4">
           {children}
         </section>
       </section>
@@ -3951,13 +3884,13 @@ function AnalysisOverlay({
   );
 }
 
-function CopyAnalysisButton({ getText }: { getText: () => string }) {
+function CopyAnalysisButton({ getMarkdown }: { getMarkdown: () => string }) {
   const [feedback, setFeedback] = useState("");
 
   async function copyAnalysis() {
     setFeedback("");
     try {
-      await navigator.clipboard.writeText(getText());
+      await navigator.clipboard.writeText(getMarkdown());
       setFeedback("已复制");
     } catch {
       setFeedback("复制失败");
@@ -3970,12 +3903,12 @@ function CopyAnalysisButton({ getText }: { getText: () => string }) {
     <>
       <button
         type="button"
-        aria-label="复制分析结果"
+        aria-label="复制 Markdown 格式的分析结果"
         onClick={copyAnalysis}
         className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-700"
       >
         <Icon aria-hidden="true" className="h-3.5 w-3.5" />
-        {feedback || "复制"}
+        {feedback || "复制 Markdown"}
       </button>
       <span role="status" className="sr-only">{feedback}</span>
     </>
@@ -3999,13 +3932,14 @@ function IssueAnalysisOverlay({
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const title = `#${issue.number} ${issue.title}`;
   const checklist = analysis?.checklist?.length ? analysis.checklist : analysis?.action_items ?? [];
   const drafts = analysis?.drafts;
   const hasDrafts = Boolean(drafts?.clarification_comment || drafts?.task_breakdown);
   return (
     <AnalysisOverlay
       agent="Issue Agent"
-      title={`#${issue.number} ${issue.title}`}
+      title={title}
       trace={{
         eyebrow: "Thinking Trace",
         title: "公开分析过程",
@@ -4014,7 +3948,7 @@ function IssueAnalysisOverlay({
         traceItems
       }}
       loading={loading}
-      canCopy={Boolean(analysis && !error)}
+      getMarkdown={analysis && !error ? () => issueAnalysisMarkdown(title, analysis, checklist) : undefined}
       onRetry={onRetry}
       onClose={onClose}
     >
@@ -4173,10 +4107,11 @@ function PRAnalysisOverlay({
   onRetry: () => void;
   onClose: () => void;
 }) {
+  const title = `#${pr.number} ${pr.title}`;
   return (
     <AnalysisOverlay
       agent="PR Merge Readiness Agent"
-      title={`#${pr.number} ${pr.title}`}
+      title={title}
       trace={{
         eyebrow: "Plan & Execute",
         title: "PR Review 过程",
@@ -4185,7 +4120,7 @@ function PRAnalysisOverlay({
         traceItems
       }}
       loading={loading}
-      canCopy={Boolean(analysis && !error)}
+      getMarkdown={analysis && !error ? () => prAnalysisMarkdown(title, analysis) : undefined}
       onRetry={onRetry}
       onClose={onClose}
     >
@@ -4278,7 +4213,7 @@ function CIAnalysisOverlay({
         traceItems
       }}
       loading={loading}
-      canCopy={Boolean(analysis && !error)}
+      getMarkdown={analysis && !error ? () => ciAnalysisMarkdown(run.name, analysis) : undefined}
       onRetry={onRetry}
       onClose={onClose}
     >

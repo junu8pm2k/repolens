@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Clock3, Folder, FolderGit2, KeyRound, PlugZap, RefreshCw, ScrollText, Trash2, Webhook } from "lucide-react";
 
@@ -150,7 +151,7 @@ export default function ReposPage() {
 
   return (
     <>
-      <PageTitle title="仓库接入" description="连接真实 Git 仓库后会立即触发后台同步；生产环境可配置 Webhook 实时触发，并通过定时同步兜底。" />
+      <PageTitle title="仓库管理" description="连接仓库、查看同步状态，以及配置各仓库的 Issue 负责人候选。" />
 
       <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
         <Card>
@@ -376,6 +377,9 @@ export default function ReposPage() {
                     <button onClick={() => selectRepo(item.id)} className={smallButtonClass}>
                       设为当前查看
                     </button>
+                    <Link href={`/repos/${encodeURIComponent(item.id)}/assignees`} className={smallButtonClass}>
+                      负责人推荐
+                    </Link>
                     <button
                       onClick={() => refreshRepo(item.id)}
                       disabled={loading}

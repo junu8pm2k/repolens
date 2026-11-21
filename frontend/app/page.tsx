@@ -36,7 +36,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import { modelInputDiagnostics } from "@/lib/context-diagnostics";
-import type { Repository } from "@/lib/types";
+import type { Repository, TeamMember } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
 
 type Issue = {
@@ -421,16 +421,6 @@ type WorkspaceItem = {
   onClick: () => void;
 };
 
-type TeamMember = {
-  id: string;
-  name: string;
-  role: string;
-  strengths: string;
-  techStack: string;
-};
-
-type TeamMemberDraft = Omit<TeamMember, "id">;
-
 type MemoryNote = {
   id: string;
   title: string;
@@ -574,7 +564,7 @@ type PromptSuggestionState = {
   suggestions: string[];
   exclude: string[];
 };
-const workspaceTabs = ["Issue", "PR", "CI", "团队", "记忆&知识库", "技能&MCP", "图谱"] as const;
+const workspaceTabs = ["Issue", "PR", "CI", "记忆&知识库", "技能&MCP", "图谱"] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
 const linkedWorkspaceTabs = new Map<string, WorkspaceTab>([
   ["issues", "Issue"],
@@ -930,7 +920,6 @@ function WorkspaceDashboard() {
   const [selectedWorkspaceItem, setSelectedWorkspaceItem] = useState<WorkspaceSelection | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
-  const [memberDraft, setMemberDraft] = useState<TeamMemberDraft>({ name: "", role: "", strengths: "", techStack: "" });
   const [memoryNotes, setMemoryNotes] = useState<MemoryNote[]>([]);
   const [memoryDraft, setMemoryDraft] = useState<MemoryNoteDraft>({ title: "", content: "" });
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
@@ -1866,28 +1855,6 @@ function WorkspaceDashboard() {
       setSelectedRepoId(repo.id);
       setSelectedConversationId(result.active_conversation_id);
     }
-  }
-
-  async function addTeamMember() {
-    if (!selectedRepo || !memberDraft.name.trim()) return;
-    const created = await apiPost<TeamMember>(`/api/repos/${selectedRepo.id}/team-members`, {
-      name: memberDraft.name.trim(),
-      role: memberDraft.role.trim(),
-      strengths: memberDraft.strengths.trim(),
-      techStack: memberDraft.techStack.trim()
-    });
-    setTeamMembers((items) => [...items.filter((item) => item.id !== created.id), created]);
-    setMemberDraft({ name: "", role: "", strengths: "", techStack: "" });
-    await loadProjectKnowledge(selectedRepo.id);
-    await loadKnowledgeGraph(selectedRepo.id);
-  }
-
-  async function removeTeamMember(memberId: string) {
-    if (!selectedRepo) return;
-    await apiDelete(`/api/repos/${selectedRepo.id}/team-members/${memberId}`);
-    setTeamMembers((items) => items.filter((item) => item.id !== memberId));
-    await loadProjectKnowledge(selectedRepo.id);
-    await loadKnowledgeGraph(selectedRepo.id);
   }
 
   async function addMemoryNote() {
@@ -2904,16 +2871,6 @@ function WorkspaceDashboard() {
             </div>
           )}
 
-          {!hasWorkspaceDetail && workspaceTab === "团队" && (
-            <TeamWorkspace
-              members={teamMembers}
-              draft={memberDraft}
-              onDraftChange={setMemberDraft}
-              onAddMember={addTeamMember}
-              onRemoveMember={removeTeamMember}
-            />
-          )}
-
           {!hasWorkspaceDetail && workspaceTab === "记忆&知识库" && (
             <MemoryHubWorkspace
               repoId={selectedRepo?.id}
@@ -2944,6 +2901,7 @@ function WorkspaceDashboard() {
 
           {!hasWorkspaceDetail && workspaceTab === "图谱" && (
             <KnowledgeGraphWorkspace
+              repoId={selectedRepo?.id}
               graph={selectedKnowledgeGraph ?? null}
               loading={graphLoadingRepoId === selectedRepo?.id}
               error={graphError}
@@ -4750,100 +4708,6 @@ function EmptyWorkspaceState({ label }: { label: string }) {
   return <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">{label}</div>;
 }
 
-function TeamWorkspace({
-  members,
-  draft,
-  onDraftChange,
-  onAddMember,
-  onRemoveMember
-}: {
-  members: TeamMember[];
-  draft: TeamMemberDraft;
-  onDraftChange: (value: TeamMemberDraft) => void;
-  onAddMember: () => void;
-  onRemoveMember: (memberId: string) => void;
-}) {
-  return (
-    <div className="space-y-4">
-      <section className="rounded-xl border border-line bg-white p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold tracking-tight text-ink">人员管理</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">配置项目工作者，Agent 会在分配 Issue 时参考职位、擅长方向和技术栈。</p>
-          </div>
-          <span className="shrink-0 whitespace-nowrap rounded-full bg-panel px-2 py-0.5 text-xs text-slate-500">{members.length} 人</span>
-        </div>
-
-        <div className="mt-4 grid gap-2">
-          <input
-            value={draft.name}
-            onChange={(event) => onDraftChange({ ...draft, name: event.target.value })}
-            placeholder="姓名，例如 Alice"
-            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-          />
-          <input
-            value={draft.role}
-            onChange={(event) => onDraftChange({ ...draft, role: event.target.value })}
-            placeholder="职位，例如 后端工程师 / 前端工程师 / Tech Lead"
-            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-          />
-          <textarea
-            value={draft.strengths}
-            onChange={(event) => onDraftChange({ ...draft, strengths: event.target.value })}
-            placeholder="擅长，例如 鉴权、API 设计、CI 排查"
-            className="min-h-16 resize-none rounded-lg border border-line bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-          />
-          <input
-            value={draft.techStack}
-            onChange={(event) => onDraftChange({ ...draft, techStack: event.target.value })}
-            placeholder="技术栈，例如 Python, FastAPI, PostgreSQL"
-            className="h-9 rounded-lg border border-line bg-white px-3 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-          />
-          <button
-            onClick={onAddMember}
-            disabled={!draft.name.trim()}
-            className="inline-flex h-9 items-center justify-center rounded-lg bg-accent px-3 text-sm font-medium text-white shadow-xs transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
-          >
-            添加成员
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-white p-4">
-        <h3 className="text-sm font-semibold tracking-tight text-ink">团队成员</h3>
-        <div className="mt-3 space-y-2">
-          {members.length === 0 && <div className="rounded-lg bg-panel p-3 text-sm text-slate-500">还没有成员。先添加一个项目工作者。</div>}
-          {members.map((member) => (
-            <div key={member.id} className="rounded-lg border border-line bg-white p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-medium text-ink">{member.name}</div>
-                  <div className="mt-1 text-xs text-slate-500">{member.role || "未配置职位"}</div>
-                </div>
-                <button onClick={() => onRemoveMember(member.id)} className="rounded-md border border-line px-2 py-1 text-xs text-slate-500 hover:bg-panel">
-                  移除
-                </button>
-              </div>
-              <div className="mt-3 space-y-1 text-xs leading-5 text-slate-600">
-                <div>擅长：{member.strengths || "未配置"}</div>
-                <div>技术栈：{member.techStack || "未配置"}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-white p-4 text-sm leading-7 text-slate-600">
-        <div className="font-medium text-ink">报告管理</div>
-        <p className="mt-2">可在中间对话框输入“生成本周研发周报”，或进入周报页面查看 Markdown 预览。</p>
-        <Link href="/reports" className="mt-3 inline-flex rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs transition hover:bg-accent-hover">
-          打开周报页
-        </Link>
-      </section>
-    </div>
-  );
-}
-
 function MemoryIndexPromptCard({
   repo,
   state,
@@ -5482,6 +5346,7 @@ function MemoryWorkspace({
 }
 
 function KnowledgeGraphWorkspace({
+  repoId,
   graph,
   loading,
   error,
@@ -5498,6 +5363,7 @@ function KnowledgeGraphWorkspace({
   onFocusNode,
   onOpenNode
 }: {
+  repoId?: string;
   graph: KnowledgeGraphResponse | null;
   loading: boolean;
   error: string | null;
@@ -5703,13 +5569,19 @@ function KnowledgeGraphWorkspace({
                   >
                     聚焦
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onOpenNode(selectedNode)}
-                    className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover"
-                  >
-                    打开
-                  </button>
+                  {selectedNode.type === "team_member" && repoId ? (
+                    <Link href={`/repos/${encodeURIComponent(repoId)}/assignees`} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
+                      负责人推荐
+                    </Link>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onOpenNode(selectedNode)}
+                      className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover"
+                    >
+                      打开
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -5780,7 +5652,7 @@ function openGraphNodeInWorkspace(
     setSelectedWorkspaceItem({ type: "ci", id: node.id });
     return;
   }
-  setWorkspaceTab(node.type === "team_member" ? "团队" : "记忆&知识库");
+  setWorkspaceTab("记忆&知识库");
   setSelectedWorkspaceItem(null);
 }
 

@@ -7,7 +7,8 @@ const nextConfig = {
       { source: "/chat", destination: "/?view=chat", permanent: false },
       { source: "/issues", destination: "/?view=issues", permanent: false },
       { source: "/pull-requests", destination: "/?view=pull-requests", permanent: false },
-      { source: "/ci", destination: "/?view=ci", permanent: false }
+      { source: "/ci", destination: "/?view=ci", permanent: false },
+      { source: "/rag", destination: "/knowledge?tab=qa", permanent: false }
     ];
   },
   env: {

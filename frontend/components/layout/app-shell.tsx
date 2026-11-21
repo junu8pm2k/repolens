@@ -8,7 +8,6 @@ import { clsx } from "clsx";
 const navItems = [
   { href: "/", label: "Workspace" },
   { href: "/knowledge", label: "项目知识" },
-  { href: "/rag", label: "RAG 工作室" },
   { href: "/repos", label: "Repos" },
   { href: "/action-drafts", label: "Drafts" },
   { href: "/workflow-runs", label: "Runs" },

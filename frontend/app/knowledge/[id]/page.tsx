@@ -1,28 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Check,
-  ChevronRight,
   FileSearch,
   FileText,
   History,
   LoaderCircle,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Settings,
+  Sparkles,
   TestTube2,
+  Trash2,
   X
 } from "lucide-react";
 
 import { PageTitle } from "@/components/ui/card";
 import { RetrievalSettings } from "@/components/rag/retrieval-settings";
-import { apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
 import {
   formatBytes,
   formatDate,
@@ -37,10 +40,13 @@ import {
   type RetrievalResponse
 } from "@/lib/rag";
 
-type Tab = "documents" | "retrieval" | "settings";
+type Tab = "documents" | "qa" | "retrieval" | "settings";
+
+const KnowledgeQuestions = dynamic(() => import("@/components/rag/knowledge-questions").then((module) => module.KnowledgeQuestions));
 
 const tabs: { value: Tab; label: string; icon: typeof FileText }[] = [
   { value: "documents", label: "文档", icon: FileText },
+  { value: "qa", label: "知识问答", icon: Sparkles },
   { value: "retrieval", label: "召回测试", icon: TestTube2 },
   { value: "settings", label: "设置", icon: Settings }
 ];
@@ -66,9 +72,28 @@ const answerGateLabel: Record<string, string> = {
 };
 
 export default function KnowledgeBaseDetailPage() {
-  const id = String(useParams<{ id: string }>().id);
+  const { id } = useParams<{ id: string }>();
+  return (
+    <Suspense fallback={<KnowledgeLoading />}>
+      <KnowledgeBaseDetail key={id} id={id} />
+    </Suspense>
+  );
+}
+
+function KnowledgeLoading() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-slate-500">
+      <LoaderCircle className="h-4 w-4 animate-spin" /> 正在加载项目知识...
+    </div>
+  );
+}
+
+function KnowledgeBaseDetail({ id }: { id: string }) {
+  const selectedTab = useSearchParams().get("tab");
+  const tab = tabs.find((item) => item.value === selectedTab)?.value ?? "documents";
   const fileInput = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<Tab>("documents");
+  const loadRequest = useRef(0);
+  const [questionsOpened, setQuestionsOpened] = useState(false);
   const [knowledge, setKnowledge] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
@@ -80,21 +105,23 @@ export default function KnowledgeBaseDetailPage() {
   const [history, setHistory] = useState<RetrievalHistory[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [indexing, setIndexing] = useState(false);
+  const [activeDocument, setActiveDocument] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    const [base, docs, models] = await Promise.all([
+    const request = ++loadRequest.current;
+    const [base, docs] = await Promise.all([
       apiGet<KnowledgeBase>(`/api/rag/repositories/${id}`),
-      apiGet<KnowledgeDocument[]>(`/api/rag/repositories/${id}/documents`),
-      apiGet<ModelCatalog>("/api/rag/models")
+      apiGet<KnowledgeDocument[]>(`/api/rag/repositories/${id}/documents`)
     ]);
+    if (loadRequest.current !== request) return;
     setKnowledge(base);
     setDocuments(docs);
-    setCatalog(models);
-    setConfig(base.config);
+    setConfig((current) => current ?? base.config);
   }, [id]);
 
   const loadHistory = useCallback(() => {
@@ -102,23 +129,46 @@ export default function KnowledgeBaseDetailPage() {
   }, [id]);
 
   useEffect(() => {
-    const initial = new URLSearchParams(window.location.search).get("tab");
-    if (initial === "retrieval" || initial === "settings") setTab(initial);
+    let ignore = false;
     load()
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false));
-    loadHistory();
-  }, [load, loadHistory]);
+      .catch((reason: Error) => { if (!ignore) setError(reason.message); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => {
+      ignore = true;
+      loadRequest.current += 1;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (tab === "qa") setQuestionsOpened(true);
+    if (tab === "retrieval") loadHistory();
+  }, [tab, loadHistory]);
+
+  useEffect(() => {
+    if (tab !== "settings" || catalog) return;
+    let ignore = false;
+    apiGet<ModelCatalog>("/api/rag/models")
+      .then((models) => { if (!ignore) setCatalog(models); })
+      .catch((reason: Error) => { if (!ignore) setError(reason.message); });
+    return () => { ignore = true; };
+  }, [tab, catalog]);
 
   useEffect(() => {
     if (!documents.some((item) => !["completed", "failed"].includes(item.status))) return;
-    const timer = window.setInterval(() => load().catch(() => null), 1000);
+    let checking = false;
+    const timer = window.setInterval(async () => {
+      if (checking) return;
+      checking = true;
+      await load().catch(() => null);
+      checking = false;
+    }, 1000);
     return () => window.clearInterval(timer);
   }, [documents, load]);
 
   function changeTab(next: Tab) {
-    setTab(next);
-    window.history.replaceState(null, "", `${window.location.pathname}?tab=${next}`);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", next);
+    window.history.replaceState(null, "", url);
   }
 
   async function uploadFiles(list: FileList | null) {
@@ -150,9 +200,43 @@ export default function KnowledgeBaseDetailPage() {
     }
   }
 
-  async function retry(document: KnowledgeDocument) {
-    await apiPost(`/api/rag/repositories/${id}/documents/${document.id}/retry`, {});
-    await load();
+  async function changeDocument(document: KnowledgeDocument, action: "retry" | "delete") {
+    if (activeDocument || indexing) return;
+    if (action === "delete" && !window.confirm(`删除“${document.name}”及其分段？`)) return;
+    setActiveDocument(document.id);
+    setError("");
+    setMessage("");
+    const path = `/api/rag/repositories/${id}/documents/${document.id}`;
+    try {
+      if (action === "retry") {
+        await apiPost(`${path}/retry`, {});
+      } else {
+        await apiDelete(path);
+        setDocuments((current) => current.filter((item) => item.id !== document.id));
+        setSelectedDocument((current) => current?.id === document.id ? null : current);
+      }
+      await load();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "文档操作失败");
+    } finally {
+      setActiveDocument(null);
+    }
+  }
+
+  async function rebuildIndex() {
+    if (indexing || uploading || activeDocument) return;
+    setIndexing(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await apiPost<{ indexed_documents: number }>(`/api/rag/${id}/reindex`, {});
+      await load();
+      setMessage(`已重建 ${result.indexed_documents} 个文档向量。`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "重建索引失败");
+    } finally {
+      setIndexing(false);
+    }
   }
 
   async function runRetrieval() {
@@ -178,7 +262,7 @@ export default function KnowledgeBaseDetailPage() {
   }
 
   async function saveSettings() {
-    if (!config || !knowledge) return;
+    if (!config || !knowledge || indexing || saving) return;
     setSaving(true);
     setMessage("");
     setError("");
@@ -201,11 +285,7 @@ export default function KnowledgeBaseDetailPage() {
   }
 
   if (loading) {
-    return (
-      <div className="flex min-h-[60vh] items-center justify-center gap-2 text-sm text-slate-500">
-        <LoaderCircle className="h-4 w-4 animate-spin" /> 正在加载项目知识...
-      </div>
-    );
+    return <KnowledgeLoading />;
   }
   if (!knowledge || !config) {
     return <div className="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error || "未找到仓库"}</div>;
@@ -236,6 +316,7 @@ export default function KnowledgeBaseDetailPage() {
                   key={item.value}
                   type="button"
                   onClick={() => changeTab(item.value)}
+                  aria-pressed={tab === item.value}
                   className={`flex h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm transition-colors md:w-full ${
                     tab === item.value ? "bg-accent-soft font-medium text-indigo-700" : "text-slate-600 hover:bg-white hover:text-ink"
                   }`}
@@ -256,6 +337,9 @@ export default function KnowledgeBaseDetailPage() {
                     ? `${knowledge.runtime.embedding.provider} 就绪`
                     : `${knowledge.runtime.embedding.provider} 不可用`}
                 </div>
+                {knowledge.runtime.embedding.dimensions ? (
+                  <p className="text-slate-500">{knowledge.runtime.embedding.dimensions} 维</p>
+                ) : null}
               </div>
               <div>
                 <div className="text-slate-400">Rerank</div>
@@ -281,6 +365,17 @@ export default function KnowledgeBaseDetailPage() {
               </button>
             </div>
           ) : null}
+          {message ? (
+            <div role="status" className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700">
+              <Check className="h-4 w-4" /> {message}
+            </div>
+          ) : null}
+
+          {(questionsOpened || tab === "qa") && (
+            <div hidden={tab !== "qa"}>
+              <KnowledgeQuestions repoId={id} active={tab === "qa"} />
+            </div>
+          )}
 
           {tab === "documents" ? (
             <div className="mx-auto max-w-6xl">
@@ -290,31 +385,47 @@ export default function KnowledgeBaseDetailPage() {
                   <p className="mt-1 text-sm text-slate-500">查看解析状态和真实分段内容。</p>
                 </div>
                 <input ref={fileInput} type="file" multiple accept=".txt,.md,.markdown,.pdf,.docx,.json,.csv,.log" className="hidden" onChange={(event) => uploadFiles(event.target.files)} />
-                <button
-                  type="button"
-                  onClick={() => fileInput.current?.click()}
-                  disabled={uploading}
-                  className="inline-flex h-9 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {uploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} 添加文件
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={rebuildIndex} disabled={indexing || uploading || Boolean(activeDocument) || saving} className="inline-flex h-9 items-center gap-2 rounded-md border border-line px-3 text-sm text-slate-700 hover:bg-panel disabled:opacity-50">
+                    <RefreshCw className={`h-4 w-4 ${indexing ? "animate-spin" : ""}`} /> 重建索引
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInput.current?.click()}
+                    disabled={uploading || indexing}
+                    className="inline-flex h-9 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white shadow-xs transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {uploading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} 添加文件
+                  </button>
+                </div>
               </div>
 
               <div className="mt-5 overflow-hidden rounded-xl border border-line bg-white shadow-xs">
-                <div className="hidden grid-cols-[minmax(220px,1fr)_120px_100px_100px_140px_34px] gap-3 border-b border-line bg-panel px-4 py-2.5 text-xs font-medium text-slate-500 md:grid">
-                  <span>名称</span><span>状态</span><span>分段</span><span>字符数</span><span>上传时间</span><span />
+                <div className="hidden grid-cols-[minmax(0,1fr)_90px_64px_64px_110px] gap-3 border-b border-line bg-panel px-4 py-2.5 pr-[5.5rem] text-xs font-medium text-slate-500 lg:grid">
+                  <span>名称</span><span>状态</span><span>分段</span><span>字符数</span><span>上传时间</span>
                 </div>
                 {documents.map((document) => (
-                  <button key={document.id} type="button" onClick={() => document.status === "completed" && openChunks(document)} className="grid w-full gap-2 border-b border-line px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-panel md:grid-cols-[minmax(220px,1fr)_120px_100px_100px_140px_34px] md:items-center md:gap-3">
-                    <span className="flex min-w-0 items-center gap-2"><FileText className="h-4 w-4 shrink-0 text-indigo-600" /><span className="truncate text-sm font-medium text-ink">{document.name}</span></span>
-                    <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${document.status === "completed" ? "bg-emerald-50 text-emerald-700" : document.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>
-                      {statusLabel[document.status]}
-                    </span>
-                    <span className="text-xs text-slate-500"><span className="md:hidden">分段 </span>{formatNumber(document.chunk_count)}</span>
-                    <span className="text-xs text-slate-500"><span className="md:hidden">字符 </span>{formatNumber(document.character_count)}</span>
-                    <span className="text-xs text-slate-400">{formatDate(document.created_at)}</span>
-                    {document.status === "failed" ? <span onClick={(event) => { event.stopPropagation(); retry(document); }} title="重试" className="grid h-7 w-7 place-items-center text-rose-600"><RotateCcw className="h-4 w-4" /></span> : <ChevronRight className="hidden h-4 w-4 text-slate-300 md:block" />}
-                  </button>
+                  <div key={document.id} className="flex items-center border-b border-line last:border-b-0 hover:bg-panel">
+                    <button type="button" disabled={document.status !== "completed"} onClick={() => openChunks(document)} className="grid min-w-0 flex-1 gap-2 py-3 pl-4 text-left lg:grid-cols-[minmax(0,1fr)_90px_64px_64px_110px] lg:items-center lg:gap-3">
+                      <span className="flex min-w-0 items-center gap-2"><FileText className="h-4 w-4 shrink-0 text-indigo-600" /><span className="truncate text-sm font-medium text-ink">{document.name}</span></span>
+                      <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${document.status === "completed" ? "bg-emerald-50 text-emerald-700" : document.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>
+                        {statusLabel[document.status]}
+                      </span>
+                      <span className="text-xs text-slate-500"><span className="lg:hidden">分段 </span>{formatNumber(document.chunk_count)}</span>
+                      <span className="text-xs text-slate-500"><span className="lg:hidden">字符 </span>{formatNumber(document.character_count)}</span>
+                      <span className="text-xs text-slate-400">{formatDate(document.created_at)}</span>
+                    </button>
+                    <div className="flex w-[5.5rem] shrink-0 items-center justify-end gap-1 pr-4">
+                      {document.status === "failed" && (
+                        <button type="button" onClick={() => changeDocument(document, "retry")} disabled={Boolean(activeDocument) || indexing} aria-label={`重试 ${document.name}`} title="重试" className="grid h-8 w-8 place-items-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                          <RotateCcw className="h-4 w-4" />
+                        </button>
+                      )}
+                      <button type="button" onClick={() => changeDocument(document, "delete")} disabled={Boolean(activeDocument) || indexing || !["completed", "failed"].includes(document.status)} aria-label={`删除 ${document.name}`} title="删除文档" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
                 ))}
                 {!documents.length ? (
                   <div className="p-3">
@@ -454,16 +565,11 @@ export default function KnowledgeBaseDetailPage() {
               </div>
               <div className="mt-5 rounded-xl border border-line bg-white p-5 shadow-xs sm:p-7">
                 <RetrievalSettings value={config} catalog={catalog} onChange={setConfig} />
-                {message ? (
-                  <div className="mt-5 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-700">
-                    <Check className="h-4 w-4" /> {message}
-                  </div>
-                ) : null}
                 <div className="mt-6 flex justify-end border-t border-line pt-5">
                   <button
                     type="button"
                     onClick={saveSettings}
-                    disabled={saving || config.chunk_overlap >= config.chunk_size}
+                    disabled={saving || indexing || config.chunk_overlap >= config.chunk_size}
                     className="inline-flex h-9 items-center gap-2 rounded-md bg-accent px-5 text-sm font-medium text-white shadow-xs transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 保存设置

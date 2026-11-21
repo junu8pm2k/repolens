@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowRight, BookOpen, FileText, GitBranch, LoaderCircle, Search } from "lucide-react";
 
 import { PageTitle } from "@/components/ui/card";
@@ -9,6 +10,15 @@ import { apiGet } from "@/lib/api";
 import { formatDate, formatNumber, type KnowledgeBase } from "@/lib/rag";
 
 export default function KnowledgeBasesPage() {
+  return (
+    <Suspense>
+      <KnowledgeBases />
+    </Suspense>
+  );
+}
+
+function KnowledgeBases() {
+  const openQuestions = useSearchParams().get("tab") === "qa";
   const [items, setItems] = useState<KnowledgeBase[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -88,7 +98,7 @@ export default function KnowledgeBasesPage() {
           {visible.map((item) => (
             <Link
               key={item.id}
-              href={`/knowledge/${item.id}`}
+              href={`/knowledge/${item.id}${openQuestions ? "?tab=qa" : ""}`}
               className="group flex flex-col rounded-xl border border-line bg-white p-5 shadow-xs transition-colors hover:border-indigo-200 hover:bg-indigo-50/50"
             >
               <div className="flex items-start justify-between gap-3">

@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   AlertTriangle,
+  ArrowLeft,
   BookOpen,
   Cable,
   CheckCircle2,
@@ -18,6 +19,7 @@ import {
   Gauge,
   GitPullRequest,
   ListTodo,
+  Maximize2,
   Network,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,6 +39,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import { modelInputDiagnostics } from "@/lib/context-diagnostics";
+import { graphViewBox, placeGraphLabels } from "@/lib/knowledge-graph-labels";
 import type { Repository, TeamMember } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
 
@@ -553,6 +556,26 @@ type KnowledgeGraphResponse = {
   stats: Record<string, unknown>;
 };
 
+type GraphCenter = { type: string; id: string };
+
+type GraphFocusLayer = {
+  graph: KnowledgeGraphResponse;
+  center: GraphCenter;
+  previousSelection: string | null;
+  previousQuery: string;
+  previousHiddenNodeTypes: Record<string, boolean>;
+  previousHiddenRelations: Record<string, boolean>;
+};
+
+async function fetchKnowledgeGraph(repoId: string, center?: GraphCenter) {
+  const params = new URLSearchParams({ depth: "1" });
+  if (center) {
+    params.set("center_type", center.type);
+    params.set("center_id", center.id);
+  }
+  return apiGet<KnowledgeGraphResponse>(`/api/repos/${repoId}/knowledge/graph?${params.toString()}`);
+}
+
 type AddProjectStatus = {
   type: "success" | "error";
   title: string;
@@ -937,9 +960,14 @@ function WorkspaceDashboard() {
   const [indexActionError, setIndexActionError] = useState<string | null>(null);
   const [knowledgeGraphByRepo, setKnowledgeGraphByRepo] = useState<Record<string, KnowledgeGraphResponse | null>>({});
   const [graphLoadingRepoId, setGraphLoadingRepoId] = useState<string | null>(null);
+  const [graphFocus, setGraphFocus] = useState<{ repoId: string; layers: GraphFocusLayer[] } | null>(null);
+  const [graphFocusPending, setGraphFocusPending] = useState(false);
+  const [graphFocusError, setGraphFocusError] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graphQuery, setGraphQuery] = useState("");
   const [selectedGraphNodeKey, setSelectedGraphNodeKey] = useState<string | null>(null);
+  const graphFocusRequest = useRef<symbol | null>(null);
+  const graphNavigationVersion = useRef(0);
   const [hiddenGraphNodeTypes, setHiddenGraphNodeTypes] = useState<Record<string, boolean>>({});
   const [hiddenGraphRelations, setHiddenGraphRelations] = useState<Record<string, boolean>>({});
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -1010,7 +1038,8 @@ function WorkspaceDashboard() {
     : selectedRepoConversations.find((item) => item.id === selectedConversationId) ?? selectedRepoConversations[0];
   const selectedPromptState = selectedRepo ? promptStateByRepo[selectedRepo.id] : undefined;
   const selectedProjectIndexState = selectedRepo ? projectIndexByRepo[selectedRepo.id] : undefined;
-  const selectedKnowledgeGraph = selectedRepo ? knowledgeGraphByRepo[selectedRepo.id] : null;
+  const currentGraphFocus = graphFocus && graphFocus.repoId === workspaceRepoId ? graphFocus.layers.at(-1) : undefined;
+  const selectedKnowledgeGraph = currentGraphFocus?.graph ?? (selectedRepo ? knowledgeGraphByRepo[selectedRepo.id] : null);
   const promptSuggestions = selectedPromptState?.suggestions ?? [];
   const promptExclude = selectedPromptState?.exclude ?? [];
   const loadingPrompts = Boolean(selectedRepo?.id && loadingPromptRepoId === selectedRepo.id);
@@ -1476,38 +1505,105 @@ function WorkspaceDashboard() {
     return state;
   }
 
-  async function loadKnowledgeGraph(repoId: string, center?: { type: string; id: string }) {
+  async function loadKnowledgeGraph(repoId: string) {
     setGraphLoadingRepoId(repoId);
     setGraphError(null);
     try {
-      const params = new URLSearchParams({ depth: "1" });
-      if (center?.type && center.id) {
-        params.set("center_type", center.type);
-        params.set("center_id", center.id);
-      }
-      const graph = await apiGet<KnowledgeGraphResponse>(`/api/repos/${repoId}/knowledge/graph?${params.toString()}`);
+      const graph = await fetchKnowledgeGraph(repoId);
       setKnowledgeGraphByRepo((items) => ({ ...items, [repoId]: graph }));
-      const preferred = center ? graph.nodes.find((node) => node.type === center.type && node.id === center.id) : graph.nodes[0];
-      if (activeRepositoryId.current === repoId) setSelectedGraphNodeKey(preferred ? knowledgeGraphNodeKey(preferred) : null);
       return graph;
     } catch (error) {
       if (activeRepositoryId.current === repoId) setGraphError(getFriendlyError(error));
-      setKnowledgeGraphByRepo((items) => ({ ...items, [repoId]: null }));
       return null;
     } finally {
       setGraphLoadingRepoId((current) => (current === repoId ? null : current));
     }
   }
 
+  async function loadGraphFocus(center: GraphCenter, refresh = false) {
+    const repoId = selectedRepo?.id;
+    if (!repoId || graphFocusRequest.current) return;
+    if (!refresh && currentGraphFocus?.center.id === center.id && currentGraphFocus.center.type === center.type) return;
+
+    const request = Symbol();
+    graphFocusRequest.current = request;
+    if (!refresh) graphNavigationVersion.current += 1;
+    setGraphFocusPending(true);
+    setGraphFocusError(null);
+    try {
+      const graph = await fetchKnowledgeGraph(repoId, center);
+      if (graphFocusRequest.current !== request || activeRepositoryId.current !== repoId) return;
+      setGraphFocus((current) => {
+        const layers = current?.repoId === repoId ? current.layers : [];
+        if (refresh) {
+          const last = layers.at(-1);
+          if (last?.center.id !== center.id || last.center.type !== center.type) return current;
+          return { repoId, layers: [...layers.slice(0, -1), { ...last, graph }] };
+        }
+        const layer = {
+          graph,
+          center,
+          previousSelection: selectedGraphNodeKey,
+          previousQuery: graphQuery,
+          previousHiddenNodeTypes: hiddenGraphNodeTypes,
+          previousHiddenRelations: hiddenGraphRelations
+        };
+        return { repoId, layers: [...layers, layer] };
+      });
+      if (!refresh) {
+        setSelectedGraphNodeKey(`${center.type}:${center.id}`);
+        setGraphQuery("");
+        setHiddenGraphNodeTypes({});
+        setHiddenGraphRelations({});
+      }
+    } catch (error) {
+      if (graphFocusRequest.current === request && activeRepositoryId.current === repoId) {
+        setGraphFocusError(getFriendlyError(error));
+      }
+    } finally {
+      if (graphFocusRequest.current === request) {
+        graphFocusRequest.current = null;
+        setGraphFocusPending(false);
+      }
+    }
+  }
+
+  function returnToPreviousGraph() {
+    if (!currentGraphFocus) return;
+    graphNavigationVersion.current += 1;
+    graphFocusRequest.current = null;
+    setGraphFocusPending(false);
+    setGraphFocusError(null);
+    setGraphFocus((current) => current && { ...current, layers: current.layers.slice(0, -1) });
+    setSelectedGraphNodeKey(currentGraphFocus.previousSelection);
+    setGraphQuery(currentGraphFocus.previousQuery);
+    setHiddenGraphNodeTypes(currentGraphFocus.previousHiddenNodeTypes);
+    setHiddenGraphRelations(currentGraphFocus.previousHiddenRelations);
+  }
+
+  function refreshKnowledgeGraph() {
+    if (!selectedRepo) return;
+    setGraphFocusError(null);
+    return currentGraphFocus ? loadGraphFocus(currentGraphFocus.center, true) : loadKnowledgeGraph(selectedRepo.id);
+  }
+
   async function rebuildSelectedKnowledgeGraph() {
     if (!selectedRepo) return;
+    const navigationVersion = graphNavigationVersion.current;
     setGraphLoadingRepoId(selectedRepo.id);
     setGraphError(null);
+    setGraphFocusError(null);
     try {
       await apiPost(`/api/repos/${selectedRepo.id}/knowledge/graph/rebuild`, {});
-      await loadKnowledgeGraph(selectedRepo.id);
+      if (activeRepositoryId.current === selectedRepo.id) {
+        await Promise.all([
+          loadKnowledgeGraph(selectedRepo.id),
+          currentGraphFocus && graphNavigationVersion.current === navigationVersion &&
+            loadGraphFocus(currentGraphFocus.center, true)
+        ]);
+      }
     } catch (error) {
-      setGraphError(getFriendlyError(error));
+      if (activeRepositoryId.current === selectedRepo.id) setGraphFocusError(getFriendlyError(error));
     } finally {
       setGraphLoadingRepoId((current) => (current === selectedRepo.id ? null : current));
     }
@@ -1707,6 +1803,18 @@ function WorkspaceDashboard() {
   }, [selectedRepo?.id, selectedConversation?.id, isDraftConversation]);
 
   useEffect(() => {
+    graphNavigationVersion.current += 1;
+    graphFocusRequest.current = null;
+    setGraphFocus(null);
+    setGraphFocusPending(false);
+    setGraphFocusError(null);
+    setSelectedGraphNodeKey(null);
+    setGraphQuery("");
+    setHiddenGraphNodeTypes({});
+    setHiddenGraphRelations({});
+  }, [workspaceRepoId]);
+
+  useEffect(() => {
     setWorkspaceQuery("");
     setWorkspaceStatusFilter((current) => current?.repoId === workspaceRepoId && current?.tab === workspaceTab ? current : null);
     setWorkspaceOwner("all");
@@ -1716,9 +1824,6 @@ function WorkspaceDashboard() {
     } else {
       setSelectedWorkspaceItem(null);
     }
-    setGraphQuery("");
-    setHiddenGraphNodeTypes({});
-    setHiddenGraphRelations({});
     setAnalysisModalIssueId(null);
     setIssueAnalysisError(null);
     setAnalysisModalPrId(null);
@@ -2765,7 +2870,7 @@ function WorkspaceDashboard() {
                   onClick={() => {
                     if (tab === "图谱" && selectedRepo && selectedWorkspaceItem) {
                       const center = workspaceSelectionToGraphCenter(selectedWorkspaceItem);
-                      if (center) void loadKnowledgeGraph(selectedRepo.id, center);
+                      if (center) void loadGraphFocus(center);
                     }
                     setWorkspaceTab(tab);
                   }}
@@ -2934,9 +3039,12 @@ function WorkspaceDashboard() {
           {!hasWorkspaceDetail && workspaceTab === "图谱" && (
             <KnowledgeGraphWorkspace
               repoId={selectedRepo?.id}
+              repoName={selectedRepo?.full_name}
               graph={selectedKnowledgeGraph ?? null}
-              loading={graphLoadingRepoId === selectedRepo?.id}
-              error={graphError}
+              loading={graphFocusPending || graphLoadingRepoId === selectedRepo?.id}
+              error={graphFocusError ?? (!currentGraphFocus ? graphError : null)}
+              center={currentGraphFocus?.center}
+              onBack={currentGraphFocus ? returnToPreviousGraph : undefined}
               query={graphQuery}
               selectedNodeKey={selectedGraphNodeKey}
               hiddenNodeTypes={hiddenGraphNodeTypes}
@@ -2945,9 +3053,9 @@ function WorkspaceDashboard() {
               onSelectNode={setSelectedGraphNodeKey}
               onToggleNodeType={(type) => setHiddenGraphNodeTypes((items) => ({ ...items, [type]: !items[type] }))}
               onToggleRelation={(relation) => setHiddenGraphRelations((items) => ({ ...items, [relation]: !items[relation] }))}
-              onRefresh={() => selectedRepo && loadKnowledgeGraph(selectedRepo.id)}
+              onRefresh={refreshKnowledgeGraph}
               onRebuild={rebuildSelectedKnowledgeGraph}
-              onFocusNode={(node) => selectedRepo && loadKnowledgeGraph(selectedRepo.id, { type: node.type, id: node.id })}
+              onFocusNode={loadGraphFocus}
               onOpenNode={(node) => openGraphNodeInWorkspace(node, setWorkspaceTab, setSelectedWorkspaceItem, preserveWorkspaceSelectionRef)}
             />
           )}
@@ -5395,11 +5503,17 @@ function MemoryWorkspace({
   );
 }
 
+const emptyGraphNodes: KnowledgeGraphNode[] = [];
+const emptyGraphEdges: KnowledgeGraphEdge[] = [];
+const graphCenter = { x: 360, y: 190 };
+
 function KnowledgeGraphWorkspace({
   repoId,
+  repoName,
   graph,
   loading,
   error,
+  center,
   query,
   selectedNodeKey,
   hiddenNodeTypes,
@@ -5410,13 +5524,16 @@ function KnowledgeGraphWorkspace({
   onToggleRelation,
   onRefresh,
   onRebuild,
+  onBack,
   onFocusNode,
   onOpenNode
 }: {
   repoId?: string;
+  repoName?: string;
   graph: KnowledgeGraphResponse | null;
   loading: boolean;
   error: string | null;
+  center?: GraphCenter;
   query: string;
   selectedNodeKey: string | null;
   hiddenNodeTypes: Record<string, boolean>;
@@ -5427,11 +5544,29 @@ function KnowledgeGraphWorkspace({
   onToggleRelation: (relation: string) => void;
   onRefresh: () => void;
   onRebuild: () => void;
+  onBack?: () => void;
   onFocusNode: (node: KnowledgeGraphNode) => void;
   onOpenNode: (node: KnowledgeGraphNode) => void;
 }) {
-  const allNodes = graph?.nodes ?? [];
-  const allEdges = graph?.edges ?? [];
+  const [expanded, setExpanded] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const expandButtonRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+
+  useEffect(() => {
+    if (expanded) {
+      const dialog = dialogRef.current;
+      if (dialog && !dialog.open) dialog.showModal();
+      closeButtonRef.current?.focus();
+    } else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      expandButtonRef.current?.focus();
+    }
+  }, [expanded]);
+
+  const allNodes = graph?.nodes ?? emptyGraphNodes;
+  const allEdges = graph?.edges ?? emptyGraphEdges;
   const nodeByKey = useMemo(() => new Map(allNodes.map((node) => [knowledgeGraphNodeKey(node), node])), [allNodes]);
   const nodeTypes = useMemo(() => [...new Set(allNodes.map((node) => node.type))], [allNodes]);
   const relations = useMemo(() => [...new Set(allEdges.map((edge) => edge.relation))], [allEdges]);
@@ -5439,10 +5574,10 @@ function KnowledgeGraphWorkspace({
     () => filterKnowledgeGraph(allNodes, allEdges, query, hiddenNodeTypes, hiddenRelations),
     [allNodes, allEdges, query, hiddenNodeTypes, hiddenRelations]
   );
-  const centerKey = graph?.center_type && graph.center_id ? `${graph.center_type}:${graph.center_id}` : undefined;
+  const centerKey = center ? `${center.type}:${center.id}` : undefined;
   const positions = useMemo(() => layoutKnowledgeGraph(filtered.nodes, filtered.edges, centerKey), [filtered.nodes, filtered.edges, centerKey]);
-  const selectedNode =
-    (selectedNodeKey && filtered.nodes.find((node) => knowledgeGraphNodeKey(node) === selectedNodeKey)) ?? filtered.nodes[0] ?? null;
+  const selectedNode = filtered.nodes.find((node) => knowledgeGraphNodeKey(node) === selectedNodeKey) ?? filtered.nodes[0];
+  const selectedKey = selectedNode ? knowledgeGraphNodeKey(selectedNode) : undefined;
   const selectedEdges = selectedNode
     ? filtered.edges.filter(
         (edge) =>
@@ -5450,27 +5585,55 @@ function KnowledgeGraphWorkspace({
           (edge.to_type === selectedNode.type && edge.to_id === selectedNode.id)
       )
     : [];
-  const showEdgeLabels = filtered.edges.length <= 8;
-  const visibleNodeCount = graphStatNumber(graph, "visible_nodes", allNodes.length);
-  const visibleEdgeCount = graphStatNumber(graph, "visible_edges", allEdges.length);
+  const labels = useMemo(() => placeGraphLabels(
+    filtered.nodes.flatMap((node) => {
+      const key = knowledgeGraphNodeKey(node);
+      const position = positions.get(key);
+      return position ? [{ ...position, key, title: node.title, radius: key === selectedKey ? 19 : 15 }] : [];
+    }),
+    filtered.edges.length <= 8 ? filtered.edges.flatMap((edge) => {
+      const from = positions.get(`${edge.from_type}:${edge.from_id}`);
+      const to = positions.get(`${edge.to_type}:${edge.to_id}`);
+      return from && to ? [{
+        key: `edge:${edge.id}`,
+        title: graphRelationLabel(edge.relation),
+        x: (from.x + to.x) / 2,
+        y: (from.y + to.y) / 2
+      }] : [];
+    }) : [],
+    selectedKey,
+    expanded ? 22 : 18
+  ), [expanded, filtered, positions, selectedKey]);
+  const hasHiddenLabels = filtered.nodes.some((node) => !labels.has(knowledgeGraphNodeKey(node)));
   const totalEdgeCount = graphStatNumber(graph, "total_edges", allEdges.length);
 
-  return (
-    <div className="space-y-3">
-      <section className="rounded-xl border border-line bg-white p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div>
+  const content = (
+    <div className={expanded ? "flex h-full min-h-0 flex-col overflow-y-auto lg:overflow-hidden" : "space-y-3"}>
+      <section className={expanded ? "shrink-0 border-b border-line bg-white px-4 py-3 sm:px-5" : "rounded-xl border border-line bg-white p-4"}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
               <Network className="h-4 w-4 text-accent" />
-              <h3 className="text-sm font-semibold tracking-tight text-ink">项目知识图谱</h3>
+              <h3 id={expanded ? "expanded-graph-title" : undefined} className={expanded ? "text-base font-semibold text-ink" : "text-sm font-semibold tracking-tight text-ink"}>
+                项目知识图谱
+              </h3>
             </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500">把 Issue、PR、CI、成员、文档、记忆和代码文件按可追溯关系串起来。</p>
+            {expanded && repoName && <p className="mt-1 break-all text-xs text-slate-500">{repoName}</p>}
           </div>
-          <div className="flex shrink-0 gap-1">
+          <div className="flex flex-wrap gap-1.5">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-panel"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> 返回上一层
+              </button>
+            )}
             <button
               type="button"
               onClick={onRefresh}
-              disabled={loading}
+              disabled={!repoId || loading}
               title="刷新图谱"
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:opacity-50"
             >
@@ -5479,34 +5642,57 @@ function KnowledgeGraphWorkspace({
             <button
               type="button"
               onClick={onRebuild}
-              disabled={loading}
+              disabled={!repoId || loading}
               title="重建关系边"
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-slate-500 transition hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:opacity-50"
             >
               <Database className="h-3.5 w-3.5" />
             </button>
+            {expanded ? (
+              <button
+                ref={closeButtonRef}
+                type="button"
+                onClick={() => dialogRef.current?.close()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line px-2.5 text-xs font-medium text-slate-700 hover:bg-panel"
+              >
+                <X className="h-3.5 w-3.5" /> 关闭图谱
+              </button>
+            ) : (
+              <button
+                ref={expandButtonRef}
+                type="button"
+                aria-haspopup="dialog"
+                disabled={!repoId}
+                onClick={() => setExpanded(true)}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-2.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              >
+                <Maximize2 className="h-3.5 w-3.5" /> 展开图谱
+              </button>
+            )}
           </div>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-          <div className="rounded-lg bg-panel px-3 py-2">节点 {visibleNodeCount}</div>
-          <div className="rounded-lg bg-panel px-3 py-2">关系 {visibleEdgeCount}</div>
-          <div className="rounded-lg bg-panel px-3 py-2">总边 {totalEdgeCount}</div>
-        </div>
-
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-line bg-white px-3">
-          <Search className="h-4 w-4 shrink-0 text-slate-400" />
-          <input
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            placeholder="搜索节点或关系..."
-            className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
-          />
-          {query && (
-            <button type="button" onClick={() => onQueryChange("")} className="text-slate-400 hover:text-slate-600" title="清空搜索">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+        <div className={expanded ? "mt-3 flex flex-wrap items-center gap-3" : "mt-3 space-y-3"}>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+            <span>显示 {filtered.nodes.length} 个节点</span>
+            <span>显示 {filtered.edges.length} / {totalEdgeCount} 条关系</span>
+            {centerKey && <span className="font-medium text-indigo-700">聚焦 {nodeByKey.get(centerKey)?.title ?? center?.id}</span>}
+          </div>
+          <div className={`flex items-center gap-2 rounded-lg border border-line bg-white px-3 focus-within:ring-2 focus-within:ring-indigo-200 ${expanded ? "min-w-[11rem] flex-1 sm:max-w-md" : ""}`}>
+            <Search className="h-4 w-4 shrink-0 text-slate-400" />
+            <input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="搜索节点或关系..."
+              aria-label="搜索节点或关系"
+              className="h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
+            />
+            {query && (
+              <button type="button" onClick={() => onQueryChange("")} className="text-slate-400 hover:text-slate-600" title="清空搜索">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
 
         {Boolean(nodeTypes.length) && (
@@ -5516,6 +5702,7 @@ function KnowledgeGraphWorkspace({
                 key={type}
                 type="button"
                 onClick={() => onToggleNodeType(type)}
+                aria-pressed={!hiddenNodeTypes[type]}
                 className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
                   hiddenNodeTypes[type] ? "border-line bg-white text-slate-400" : "border-transparent bg-panel text-slate-700"
                 }`}
@@ -5533,6 +5720,7 @@ function KnowledgeGraphWorkspace({
                 key={relation}
                 type="button"
                 onClick={() => onToggleRelation(relation)}
+                aria-pressed={!hiddenRelations[relation]}
                 className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
                   hiddenRelations[relation] ? "border-line bg-white text-slate-400" : "border-transparent bg-panel text-slate-700"
                 }`}
@@ -5542,9 +5730,10 @@ function KnowledgeGraphWorkspace({
             ))}
           </div>
         )}
+        {hasHiddenLabels && <p className="mt-2 text-xs text-slate-500">悬停或选中节点可查看全名。</p>}
       </section>
 
-      {error && <div className="rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {error && <div role="alert" className="rounded-lg border border-rose-100 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
       {!error && !loading && (!graph || graph.nodes.length === 0) && (
         <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">还没有可展示的项目关系。同步 Issue/PR/CI，或添加项目记忆后再重建图谱。</div>
@@ -5552,37 +5741,63 @@ function KnowledgeGraphWorkspace({
 
       {loading && !graph && <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">正在加载项目知识图谱...</div>}
 
-      {graph && filtered.nodes.length === 0 && (
+      {graph && allNodes.length > 0 && filtered.nodes.length === 0 && (
         <div className="rounded-lg border border-dashed border-line bg-panel/50 p-4 text-center text-sm text-slate-500">当前搜索或过滤条件下没有匹配节点。</div>
       )}
 
       {graph && filtered.nodes.length > 0 && (
-        <section className="rounded-lg border border-line bg-white p-3">
-          <div className="overflow-x-auto rounded-md bg-panel">
-            <svg viewBox="0 0 720 420" className="h-[360px] min-w-[680px] w-full" role="img" aria-label="项目知识图谱">
+        <section
+          className={expanded
+            ? "grid shrink-0 gap-3 p-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_360px]"
+            : "rounded-lg border border-line bg-white p-3"}
+        >
+          <div className={`min-w-0 overflow-auto rounded-md bg-panel ${expanded ? "h-[42dvh] min-h-64 lg:h-auto lg:min-h-0" : ""}`}>
+            <svg
+              viewBox={`${graphViewBox.left} ${graphViewBox.top} ${graphViewBox.right - graphViewBox.left} ${graphViewBox.bottom - graphViewBox.top}`}
+              className={expanded ? "block h-full w-full min-w-[520px]" : "h-[360px] w-full min-w-[680px]"}
+              role="group"
+              aria-label="图谱节点和关系"
+            >
               {filtered.edges.map((edge) => {
                 const from = positions.get(`${edge.from_type}:${edge.from_id}`);
                 const to = positions.get(`${edge.to_type}:${edge.to_id}`);
                 if (!from || !to) return null;
                 const color = graphRelationColor(edge.relation);
+                const label = labels.get(`edge:${edge.id}`);
                 return (
                   <g key={edge.id}>
                     <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} stroke={color} strokeWidth={edge.relation === "used_as_evidence" ? 2.8 : 1.6} strokeOpacity="0.58" />
-                    {showEdgeLabels && (
-                      <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 5} textAnchor="middle" fontSize="10" fill={color} fontWeight="700">
-                        {graphRelationLabel(edge.relation)}
+                    {label && (
+                      <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central" fontSize="10" fill={color} fontWeight="700" paintOrder="stroke" stroke="#f8f9fb" strokeWidth="3">
+                        {label.title}
                       </text>
                     )}
                   </g>
                 );
               })}
               {filtered.nodes.map((node) => {
-                const pos = positions.get(knowledgeGraphNodeKey(node));
+                const key = knowledgeGraphNodeKey(node);
+                const pos = positions.get(key);
                 if (!pos) return null;
-                const selected = selectedNode ? knowledgeGraphNodeKey(selectedNode) === knowledgeGraphNodeKey(node) : false;
+                const selected = selectedNode === node;
                 const style = graphNodeStyle(node.type);
+                const label = labels.get(key);
                 return (
-                  <g key={knowledgeGraphNodeKey(node)} role="button" tabIndex={0} onClick={() => onSelectNode(knowledgeGraphNodeKey(node))} className="cursor-pointer">
+                  <g
+                    key={key}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={node.title}
+                    aria-pressed={selected}
+                    onClick={() => onSelectNode(key)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      onSelectNode(key);
+                    }}
+                    className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-400"
+                  >
+                    <title>{node.title}</title>
                     <circle
                       cx={pos.x}
                       cy={pos.y}
@@ -5591,12 +5806,11 @@ function KnowledgeGraphWorkspace({
                       stroke={node.highlighted ? "#d97706" : selected ? "#0f172a" : style.stroke}
                       strokeWidth={node.highlighted || selected ? 2.6 : 1.6}
                     />
-                    <text x={pos.x} y={pos.y + 34} textAnchor="middle" fontSize="11" fontWeight={selected ? "700" : "600"} fill="#334155">
-                      {clipGraphLabel(node.title, 18)}
-                    </text>
-                    <text x={pos.x} y={pos.y + 48} textAnchor="middle" fontSize="9" fill="#64748b">
-                      {graphNodeTypeLabel(node.type)}
-                    </text>
+                    {label && (
+                      <text x={label.x} y={label.y} textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight={selected ? "700" : "600"} fill="#334155" paintOrder="stroke" stroke="#f8f9fb" strokeWidth="3">
+                        {label.title}
+                      </text>
+                    )}
                   </g>
                 );
               })}
@@ -5604,31 +5818,31 @@ function KnowledgeGraphWorkspace({
           </div>
 
           {selectedNode && (
-            <div className="mt-3 rounded-lg border border-line bg-white p-3">
-              <div className="flex items-start justify-between gap-3">
+            <section aria-label="节点详情" className={`rounded-lg border border-line bg-white p-3 ${expanded ? "lg:overflow-y-auto" : "mt-3"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-accent">{graphNodeTypeLabel(selectedNode.type)}</div>
-                  <div className="mt-1 line-clamp-2 text-sm font-semibold tracking-tight text-ink">{selectedNode.title}</div>
+                  <h4 className="mt-1 break-words text-sm font-semibold tracking-tight text-ink">{selectedNode.title}</h4>
                   {selectedNode.subtitle && <div className="mt-1 text-xs text-slate-500">{selectedNode.subtitle}</div>}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <button
                     type="button"
                     onClick={() => onFocusNode(selectedNode)}
-                    className="rounded-lg border border-line px-2 py-1 text-xs text-slate-600 transition hover:bg-panel"
+                    disabled={loading || selectedKey === centerKey}
+                    className="rounded-lg border border-line px-2 py-1 text-xs text-slate-600 transition hover:bg-panel disabled:opacity-50"
                   >
                     聚焦
                   </button>
                   {selectedNode.type === "team_member" && repoId ? (
-                    <Link href={`/repos/${encodeURIComponent(repoId)}/assignees`} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
+                    <Link href={`/repos/${encodeURIComponent(repoId)}/assignees`} onClick={() => dialogRef.current?.close()} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
                       负责人推荐
                     </Link>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => onOpenNode(selectedNode)}
-                      className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover"
-                    >
+                    <button type="button" onClick={() => {
+                      dialogRef.current?.close();
+                      onOpenNode(selectedNode);
+                    }} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
                       打开
                     </button>
                   )}
@@ -5637,22 +5851,39 @@ function KnowledgeGraphWorkspace({
 
               <div className="mt-3 space-y-1.5">
                 {selectedEdges.length === 0 && <div className="text-xs text-slate-500">这个节点暂时没有可见关系。</div>}
-                {selectedEdges.slice(0, 8).map((edge) => {
+                {(expanded ? selectedEdges : selectedEdges.slice(0, 8)).map((edge) => {
                   const isOutgoing = edge.from_type === selectedNode.type && edge.from_id === selectedNode.id;
                   const other = nodeByKey.get(isOutgoing ? `${edge.to_type}:${edge.to_id}` : `${edge.from_type}:${edge.from_id}`);
                   return (
                     <div key={edge.id} className="rounded-lg bg-panel px-3 py-2 text-xs text-slate-600">
                       <span className="font-medium text-ink">{isOutgoing ? "→" : "←"} {graphRelationLabel(edge.relation)}</span>
-                      <span className="ml-2">{other?.title ?? edge.to_id}</span>
+                      <span className="ml-2">{other?.title ?? (isOutgoing ? edge.to_id : edge.from_id)}</span>
                     </div>
                   );
                 })}
               </div>
-            </div>
+            </section>
           )}
         </section>
       )}
     </div>
+  );
+
+  return (
+    <>
+      {!expanded && content}
+      <dialog
+        ref={dialogRef}
+        aria-labelledby="expanded-graph-title"
+        onClose={() => {
+          restoreFocus.current = true;
+          setExpanded(false);
+        }}
+        className="fixed inset-0 m-auto h-[calc(100dvh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none overflow-hidden rounded-xl border border-line bg-white p-0 text-ink shadow-pop backdrop:bg-slate-950/40 sm:h-[calc(100dvh-2rem)] sm:w-[calc(100vw-2rem)]"
+      >
+        {expanded && content}
+      </dialog>
+    </>
   );
 }
 
@@ -5770,7 +6001,7 @@ function layoutKnowledgeGraph(nodes: KnowledgeGraphNode[], edges: KnowledgeGraph
     requestedCenter ??
     [...nodes].sort((a, b) => (degrees.get(knowledgeGraphNodeKey(b)) ?? 0) - (degrees.get(knowledgeGraphNodeKey(a)) ?? 0))[0];
   const centerNodeKey = knowledgeGraphNodeKey(resolvedCenter);
-  positions.set(centerNodeKey, { x: 360, y: 190 });
+  positions.set(centerNodeKey, graphCenter);
   const neighborKeys = new Set<string>();
   for (const edge of edges) {
     const fromKey = `${edge.from_type}:${edge.from_id}`;
@@ -5780,8 +6011,8 @@ function layoutKnowledgeGraph(nodes: KnowledgeGraphNode[], edges: KnowledgeGraph
   }
   const neighbors = nodes.filter((node) => neighborKeys.has(knowledgeGraphNodeKey(node)));
   const remaining = nodes.filter((node) => knowledgeGraphNodeKey(node) !== centerNodeKey && !neighborKeys.has(knowledgeGraphNodeKey(node)));
-  placeGraphRing(positions, neighbors, 360, 190, neighbors.length > 10 ? 145 : 122, -Math.PI / 2);
-  placeGraphRing(positions, remaining, 360, 190, 184, Math.PI / 9);
+  placeGraphRing(positions, neighbors, graphCenter.x, graphCenter.y, neighbors.length > 10 ? 145 : 122, -Math.PI / 2);
+  placeGraphRing(positions, remaining, graphCenter.x, graphCenter.y, 184, Math.PI / 9);
   return positions;
 }
 
@@ -5866,10 +6097,6 @@ function graphRelationColor(relation: string) {
 function graphStatNumber(graph: KnowledgeGraphResponse | null, key: string, fallback: number) {
   const value = graph?.stats?.[key];
   return typeof value === "number" ? value : fallback;
-}
-
-function clipGraphLabel(text: string, limit: number) {
-  return text.length <= limit ? text : `${text.slice(0, limit - 1).trim()}…`;
 }
 
 function classifyIssue(issue: Issue) {

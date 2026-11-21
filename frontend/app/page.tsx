@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -31,7 +32,7 @@ import {
   XCircle,
   type LucideIcon
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import { modelInputDiagnostics } from "@/lib/context-diagnostics";
@@ -575,6 +576,11 @@ type PromptSuggestionState = {
 };
 const workspaceTabs = ["Issue", "PR", "CI", "团队", "记忆&知识库", "技能&MCP", "图谱"] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
+const linkedWorkspaceTabs = new Map<string, WorkspaceTab>([
+  ["issues", "Issue"],
+  ["pull-requests", "PR"],
+  ["ci", "CI"]
+]);
 
 const DRAFT_CONVERSATION_PREFIX = "draft:";
 
@@ -894,6 +900,16 @@ const WORKSPACE_MAX_WIDTH = 480;
 const CHAT_MIN_WIDTH = 360;
 
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <WorkspaceDashboard />
+    </Suspense>
+  );
+}
+
+function WorkspaceDashboard() {
+  const view = useSearchParams().get("view");
+  const linkedTab = linkedWorkspaceTabs.get(view ?? "") ?? "Issue";
   const [repos, setRepos] = useState<Repository[]>([]);
   const [selectedRepoId, setSelectedRepoId] = useState("");
   const [conversationMap, setConversationMap] = useState<Record<string, ProjectConversation[]>>({});
@@ -904,7 +920,7 @@ export default function DashboardPage() {
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("Issue");
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(linkedTab);
   const [workspaceWidth, setWorkspaceWidth] = useState(400);
   const [workspaceMaxWidth, setWorkspaceMaxWidth] = useState(WORKSPACE_MAX_WIDTH);
   const [workspaceQuery, setWorkspaceQuery] = useState("");
@@ -972,12 +988,20 @@ export default function DashboardPage() {
   const wasWideLayoutRef = useRef(true);
   const autoCollapsedSidebarRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const promptRowRef = useRef<HTMLDivElement>(null);
   const promptMeasureRef = useRef<HTMLDivElement>(null);
   const activeRepositoryId = useRef("");
   const [visiblePromptCount, setVisiblePromptCount] = useState(5);
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0], [repos, selectedRepoId]);
+  const hasRepository = Boolean(selectedRepo);
+  useEffect(() => {
+    setWorkspaceTab(linkedWorkspaceTabs.get(view ?? "") ?? "Issue");
+  }, [view]);
+  useEffect(() => {
+    if (view === "chat" && hasRepository) chatInputRef.current?.focus();
+  }, [view, hasRepository]);
   useEffect(() => {
     activeRepositoryId.current = selectedRepo?.id ?? "";
     return () => { activeRepositoryId.current = ""; };
@@ -2742,6 +2766,7 @@ export default function DashboardPage() {
               {workspaceTabs.map((tab) => (
                 <button
                   key={tab}
+                  aria-pressed={workspaceTab === tab}
                   onClick={() => {
                     if (tab === "图谱" && selectedRepo && selectedWorkspaceItem) {
                       const center = workspaceSelectionToGraphCenter(selectedWorkspaceItem);
@@ -3096,6 +3121,7 @@ export default function DashboardPage() {
                 )}
                 <div className="flex items-stretch gap-2">
                   <textarea
+                    ref={chatInputRef}
                     className={`max-h-40 min-h-[4.5rem] min-w-0 flex-1 resize-none rounded-xl border bg-white px-3.5 py-3 text-sm leading-6 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 ${
                       planMode ? "border-indigo-300 ring-2 ring-indigo-100" : "border-line"
                     }`}

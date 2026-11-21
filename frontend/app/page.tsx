@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -35,13 +34,14 @@ import {
   XCircle,
   type LucideIcon
 } from "lucide-react";
-import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 
 import { apiDelete, apiGet, apiPost, apiPostStream, apiUpload } from "@/lib/api";
 import { modelInputDiagnostics } from "@/lib/context-diagnostics";
 import { graphViewBox, placeGraphLabels } from "@/lib/knowledge-graph-labels";
 import type { Repository, TeamMember } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
+import { AssigneeSettings } from "@/components/workspace/assignee-settings";
 
 type Issue = {
   id: string;
@@ -588,14 +588,15 @@ type PromptSuggestionState = {
   suggestions: string[];
   exclude: string[];
 };
-const workspaceTabs = ["Issue", "PR", "CI", "记忆&知识库", "技能&MCP", "图谱"] as const;
+const workspaceTabs = ["Issue", "PR", "CI", "团队", "记忆&知识库", "技能&MCP", "图谱"] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
 type WorkspaceListTab = "Issue" | "PR" | "CI";
 type WorkspaceStatusFilter = { repoId: string | undefined; tab: WorkspaceTab; value: string };
 const linkedWorkspaceTabs = new Map<string, WorkspaceTab>([
   ["issues", "Issue"],
   ["pull-requests", "PR"],
-  ["ci", "CI"]
+  ["ci", "CI"],
+  ["team", "团队"]
 ]);
 
 const DRAFT_CONVERSATION_PREFIX = "draft:";
@@ -924,10 +925,12 @@ export default function DashboardPage() {
 }
 
 function WorkspaceDashboard() {
-  const view = useSearchParams().get("view");
+  const searchParams = useSearchParams();
+  const view = searchParams.get("view");
+  const linkedRepoId = view === "team" ? searchParams.get("repo") ?? "" : "";
   const linkedTab = linkedWorkspaceTabs.get(view ?? "") ?? "Issue";
   const [repos, setRepos] = useState<Repository[]>([]);
-  const [selectedRepoId, setSelectedRepoId] = useState("");
+  const [selectedRepoId, setSelectedRepoId] = useState(linkedRepoId);
   const [conversationMap, setConversationMap] = useState<Record<string, ProjectConversation[]>>({});
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [expandedRepoIds, setExpandedRepoIds] = useState<Record<string, boolean>>({});
@@ -945,7 +948,8 @@ function WorkspaceDashboard() {
   const [workspaceTime, setWorkspaceTime] = useState("all");
   const [selectedWorkspaceItem, setSelectedWorkspaceItem] = useState<WorkspaceSelection | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamRoster, setTeamRoster] = useState<{ repoId: string; members: TeamMember[]; error: string | null } | null>(null);
+  const teamRequest = useRef(0);
   const [memoryNotes, setMemoryNotes] = useState<MemoryNote[]>([]);
   const [memoryDraft, setMemoryDraft] = useState<MemoryNoteDraft>({ title: "", content: "" });
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
@@ -1017,6 +1021,8 @@ function WorkspaceDashboard() {
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0], [repos, selectedRepoId]);
   const workspaceRepoId = selectedRepo?.id;
+  const selectedTeamRoster = teamRoster?.repoId === workspaceRepoId ? teamRoster : null;
+  const teamMembers = selectedTeamRoster?.members ?? [];
   const workspaceStatus = workspaceStatusFilter?.repoId === workspaceRepoId && workspaceStatusFilter?.tab === workspaceTab
     ? workspaceStatusFilter.value
     : "all";
@@ -1044,8 +1050,9 @@ function WorkspaceDashboard() {
   const promptExclude = selectedPromptState?.exclude ?? [];
   const loadingPrompts = Boolean(selectedRepo?.id && loadingPromptRepoId === selectedRepo.id);
 
-  async function loadRepos() {
+  const loadRepos = useCallback(async () => {
     const items = await apiGet<Repository[]>("/api/repos");
+    const initialRepoId = items.find((repo) => repo.id === linkedRepoId)?.id ?? items[0]?.id ?? "";
     setRepos(items);
     const pairs = await Promise.all(
       items.map(async (repo) => [repo.id, await apiGet<ProjectConversation[]>(`/api/repos/${repo.id}/conversations`).catch(() => [])] as const)
@@ -1053,12 +1060,11 @@ function WorkspaceDashboard() {
     const nextMap = Object.fromEntries(pairs);
     setConversationMap(nextMap);
     setExpandedRepoIds((current) => {
-      const firstRepoId = items[0]?.id;
-      return firstRepoId && Object.keys(current).length === 0 ? { [firstRepoId]: true } : current;
+      return initialRepoId && Object.keys(current).length === 0 ? { [initialRepoId]: true } : current;
     });
-    setSelectedRepoId((current) => current || items[0]?.id || "");
-    setSelectedConversationId((current) => current || (items[0] ? nextMap[items[0].id]?.[0]?.id ?? "" : ""));
-  }
+    setSelectedRepoId((current) => current || initialRepoId);
+    setSelectedConversationId((current) => current || nextMap[initialRepoId]?.[0]?.id || "");
+  }, [linkedRepoId]);
 
   async function loadRepoConversations(repoId: string) {
     const conversations = await apiGet<ProjectConversation[]>(`/api/repos/${repoId}/conversations`).catch(() => []);
@@ -1478,13 +1484,31 @@ function WorkspaceDashboard() {
     }
   }
 
-  async function loadProjectKnowledge(repoId: string) {
-    const [members, knowledge] = await Promise.all([
-      apiGet<TeamMember[]>(`/api/repos/${repoId}/team-members`).catch(() => []),
+  const loadTeamRoster = useCallback(async (repoId: string) => {
+    if (activeRepositoryId.current !== repoId) return;
+    const request = ++teamRequest.current;
+    try {
+      const members = await apiGet<TeamMember[]>(`/api/repos/${repoId}/team-members`);
+      if (activeRepositoryId.current === repoId && request === teamRequest.current) {
+        setTeamRoster({ repoId, members, error: null });
+      }
+    } catch (error) {
+      if (activeRepositoryId.current === repoId && request === teamRequest.current) {
+        setTeamRoster((current) => ({
+          repoId,
+          members: current?.repoId === repoId ? current.members : [],
+          error: getFriendlyError(error)
+        }));
+      }
+    }
+  }, []);
+
+  const loadProjectKnowledge = useCallback(async (repoId: string) => {
+    const [, knowledge] = await Promise.all([
+      loadTeamRoster(repoId),
       apiGet<KnowledgeItem[]>(`/api/repos/${repoId}/knowledge`).catch(() => [])
     ]);
     if (activeRepositoryId.current !== repoId) return;
-    setTeamMembers(members);
     setKnowledgeItems(knowledge);
     setMemoryNotes(
       knowledge
@@ -1495,6 +1519,29 @@ function WorkspaceDashboard() {
           content: item.content_preview
       }))
     );
+  }, [loadTeamRoster]);
+
+  function updateTeamRoster(repoId: string, update: (members: TeamMember[]) => TeamMember[]) {
+    if (activeRepositoryId.current !== repoId) return;
+    teamRequest.current += 1;
+    setTeamRoster((current) => ({
+      repoId,
+      members: update(current?.repoId === repoId ? current.members : []),
+      error: null
+    }));
+    void Promise.all([loadProjectKnowledge(repoId), loadKnowledgeGraph(repoId)]);
+  }
+
+  async function saveTeamMember(profile: Omit<TeamMember, "id">) {
+    if (!workspaceRepoId) return;
+    const member = await apiPost<TeamMember>(`/api/repos/${workspaceRepoId}/team-members`, profile);
+    updateTeamRoster(workspaceRepoId, (current) => [...current.filter((item) => item.id !== member.id), member]);
+  }
+
+  async function removeTeamMember(memberId: string) {
+    if (!workspaceRepoId) return;
+    await apiDelete(`/api/repos/${workspaceRepoId}/team-members/${encodeURIComponent(memberId)}`);
+    updateTeamRoster(workspaceRepoId, (current) => current.filter((member) => member.id !== memberId));
   }
 
   async function loadProjectIndexState(repoId: string) {
@@ -1725,7 +1772,7 @@ function WorkspaceDashboard() {
 
   useEffect(() => {
     loadRepos().catch(() => setRepos([]));
-  }, []);
+  }, [loadRepos]);
 
   useEffect(() => {
     if (workspaceTab === "技能&MCP" && !mcpRuntime && !skillRuntimeLoading) {
@@ -1738,7 +1785,6 @@ function WorkspaceDashboard() {
       setIssues([]);
       setPrs([]);
       setRuns([]);
-      setTeamMembers([]);
       setKnowledgeItems([]);
       setMemoryNotes([]);
       loadRepoData(selectedRepo.id);
@@ -1749,14 +1795,14 @@ function WorkspaceDashboard() {
         loadPromptSuggestions(selectedRepo.id).catch(() => undefined);
       }
     } else {
-      setTeamMembers([]);
+      setTeamRoster(null);
       setMemoryNotes([]);
       setKnowledgeItems([]);
       setKnowledgeGraphByRepo({});
       setSelectedGraphNodeKey(null);
       setMessages([]);
     }
-  }, [selectedRepo?.id]);
+  }, [selectedRepo?.id, loadProjectKnowledge]);
 
   useEffect(() => {
     if (!loadingPrompts) {
@@ -3006,6 +3052,20 @@ function WorkspaceDashboard() {
                 />
               ))}
             </div>
+          )}
+
+          {!hasWorkspaceDetail && workspaceTab === "团队" && (
+            workspaceRepoId ? (
+              <AssigneeSettings
+                key={workspaceRepoId}
+                members={teamMembers}
+                loading={!selectedTeamRoster}
+                loadError={selectedTeamRoster?.error ?? null}
+                onSave={saveTeamMember}
+                onRemove={removeTeamMember}
+                onRetry={() => loadTeamRoster(workspaceRepoId)}
+              />
+            ) : <EmptyWorkspaceState label="选择仓库后可配置负责人推荐" />
           )}
 
           {!hasWorkspaceDetail && workspaceTab === "记忆&知识库" && (
@@ -5834,18 +5894,12 @@ function KnowledgeGraphWorkspace({
                   >
                     聚焦
                   </button>
-                  {selectedNode.type === "team_member" && repoId ? (
-                    <Link href={`/repos/${encodeURIComponent(repoId)}/assignees`} onClick={() => dialogRef.current?.close()} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
-                      负责人推荐
-                    </Link>
-                  ) : (
-                    <button type="button" onClick={() => {
-                      dialogRef.current?.close();
-                      onOpenNode(selectedNode);
-                    }} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
-                      打开
-                    </button>
-                  )}
+                  <button type="button" onClick={() => {
+                    dialogRef.current?.close();
+                    onOpenNode(selectedNode);
+                  }} className="rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition hover:bg-accent-hover">
+                    {selectedNode.type === "team_member" ? "负责人推荐" : "打开"}
+                  </button>
                 </div>
               </div>
 
@@ -5933,7 +5987,7 @@ function openGraphNodeInWorkspace(
     setSelectedWorkspaceItem({ type: "ci", id: node.id });
     return;
   }
-  setWorkspaceTab("记忆&知识库");
+  setWorkspaceTab(node.type === "team_member" ? "团队" : "记忆&知识库");
   setSelectedWorkspaceItem(null);
 }
 

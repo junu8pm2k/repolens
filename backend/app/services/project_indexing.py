@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +24,11 @@ from app.services.rag.vector_store import (
     DocumentPayload,
     replace_documents,
     stable_source_id,
+)
+from app.services.team_resources.apply import project_lock
+from app.services.team_resources.documents import (
+    TeamDocuments,
+    load_team_documents,
 )
 
 PROJECT_INDEX_SOURCE_TYPES = [
@@ -572,11 +578,23 @@ def _payloads_for_candidates(
     root: Path,
     candidates: list[ProjectDocCandidate],
     fingerprint: str,
+    team_docs: TeamDocuments | None = None,
 ) -> list[DocumentPayload]:
     payloads: list[DocumentPayload] = []
     scanned_at = _now().isoformat()
     for candidate in candidates:
-        text = _read_text(candidate.path)
+        path = candidate.relative_path
+        team_file = team_docs.files.get(path) if team_docs else None
+        provenance = {}
+        if team_file is not None and team_docs is not None:
+            text = team_docs.read(root, path)
+            provenance = {
+                "team_shared": True,
+                "team_source_path": team_file.sources[0],
+                "team_source_commit": team_file.source_commit,
+            }
+        else:
+            text = _read_text(candidate.path)
         if not text or not text.strip():
             continue
         source_id = stable_source_id(
@@ -586,6 +604,8 @@ def _payloads_for_candidates(
         chunks = chunk_document(
             text, candidate.relative_path, max_chars=1800, overlap=180
         )
+        if team_file is not None and not chunks:
+            raise ValueError(f"团队文档缺少可索引内容：{path}")
         for index, chunk in enumerate(chunks):
             content = str(chunk["content"])
             section_title = chunk.get("section_title")
@@ -615,6 +635,7 @@ def _payloads_for_candidates(
                         "chunk_strategy": "structure_aware_v1",
                         "fingerprint": fingerprint,
                         "scanned_at": scanned_at,
+                        **provenance,
                     },
                 )
             )
@@ -638,9 +659,16 @@ def scan_project_index(db: Session, repo: Repository) -> dict[str, Any]:
                 "项目本地路径不存在，请先连接本地仓库或完成代码同步"
             )
 
+        team_docs = load_team_documents(root)
         discovery = _discover_project_docs(root)
         candidates = discovery.candidates
-        payloads = _payloads_for_candidates(repo, root, candidates, fp)
+        if team_docs is not None:
+            team_docs.require_paths(
+                {item.relative_path for item in candidates}
+            )
+        payloads = _payloads_for_candidates(
+            repo, root, candidates, fp, team_docs
+        )
         overview = {
             "repo": repo.full_name,
             "description": repo.description or "",
@@ -678,6 +706,8 @@ def scan_project_index(db: Session, repo: Repository) -> dict[str, Any]:
             sync_vector_store=False,
         )
         summary = _build_summary(repo, root, candidates, len(docs), discovery)
+        if team_docs is not None:
+            summary["team_docs_digest"] = team_docs.digest
         row = _get_or_create_state(db, repo.id)
         row.status = "ready"
         row.fingerprint = fp
@@ -693,7 +723,13 @@ def scan_project_index(db: Session, repo: Repository) -> dict[str, Any]:
         from app.services.chat_memory import EvidenceStore
 
         EvidenceStore(db).rebuild_repo(repo)
-        db.commit()
+        with project_lock(root) if team_docs is not None else nullcontext():
+            if load_team_documents(root) != team_docs:
+                raise ValueError("团队文档在索引期间发生变化，请重新扫描")
+            if team_docs is not None:
+                for path in team_docs.files:
+                    team_docs.read(root, path)
+            db.commit()
         db.refresh(row)
         rebuild_knowledge_graph(db, repo)
         return _state_payload(repo, row, fingerprint=fp)

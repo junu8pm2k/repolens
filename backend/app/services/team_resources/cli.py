@@ -97,11 +97,11 @@ def _run(args: argparse.Namespace) -> int:
         with httpx.Client(
             base_url=api_url, timeout=3, trust_env=False
         ) as client:
-            ensure_index(client, target, manifest.team_docs_digest)
+            repo_id = ensure_index(client, target, manifest.team_docs_digest)
     except (httpx.HTTPError, ValueError) as exc:
         print(f"文件已同步，文档索引待重试：{exc}", file=sys.stderr)
         return 5
-    print("文档索引已就绪")
+    print(f"文档索引已就绪，RepoLens 项目 ID {repo_id}")
     return 0
 
 

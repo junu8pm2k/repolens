@@ -1,10 +1,24 @@
+import asyncio
+import json
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
+from app.api.routes import project_index, repos
+from app.db.models import Base, Repository
+from app.db.session import get_db
+from app.mcp import memory_server
+from app.services import project_indexing
 from app.services.team_resources import apply, cli
+from app.services.team_resources.index_client import ensure_index
 from app.services.team_resources.manifest import (
     DEFAULT_DOCS_DIR,
     MANIFEST_PATH,
@@ -120,6 +134,7 @@ def test_apply_pins_snapshot_and_avoids_rewriting_complete_sync(projects):
     assert manifest.applied_commit != other_commit
     assert (target / MIRROR).read_bytes() == b"# Migration\n\nOriginal.\n"
     assert (target / SKILL).is_file()
+    assert _git(target, "check-ignore", MANIFEST_PATH.as_posix())
     assert (
         (target / "AGENTS.md")
         .read_bytes()
@@ -215,3 +230,132 @@ def test_cli_reports_index_failure_without_undoing_applied_files(
     monkeypatch.setattr(cli, "ensure_index", lambda *_args: None)
     assert cli.main(argv) == 0
     assert "文件无变化" in capsys.readouterr().out
+
+
+@pytest.fixture
+def index_service(projects, monkeypatch):
+    _, target = projects
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as db:
+        repo = Repository(
+            owner="repolens",
+            name="sync-target",
+            full_name="repolens/sync-target",
+            local_path=str(target),
+            checkout_mode="local",
+        )
+        db.add(repo)
+        db.commit()
+        repo_id = repo.id
+
+    def test_db():
+        with session_factory() as db:
+            yield db
+
+    app = FastAPI()
+    app.include_router(repos.router, prefix="/api/repos")
+    app.include_router(project_index.router, prefix="/api/repos")
+    app.dependency_overrides[get_db] = test_db
+    monkeypatch.setattr(project_indexing, "SessionLocal", session_factory)
+    monkeypatch.setattr(memory_server, "SessionLocal", session_factory)
+    monkeypatch.setenv(memory_server.RECALL_BINDING_ENV, str(repo_id))
+    with TestClient(app) as client:
+        yield client, repo_id, session_factory
+    engine.dispose()
+
+
+def _call_recall(repo_id: uuid.UUID, query: str) -> dict:
+    return asyncio.run(
+        memory_server.handle_request(
+            {
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "recall",
+                    "arguments": {"repo_id": str(repo_id), "query": query},
+                },
+            }
+        )
+    )
+
+
+def _recall(repo_id: uuid.UUID, query: str) -> list[dict]:
+    result = _call_recall(repo_id, query)["result"]
+    return json.loads(result["content"][0]["text"])["results"]
+
+
+def test_http_index_and_recall_publish_verified_source_versions(
+    projects, index_service
+):
+    source, target = projects
+    client, repo_id, _ = index_service
+    _write(target, "docs/local.md", "# Original\n\nOriginal local note.\n")
+    first = apply.apply_plan(target, _plan(source, target))
+    assert ensure_index(client, target, first.team_docs_digest) == repo_id
+    result = _recall(repo_id, "Original")
+    assert len(result) == 1
+    assert result[0]["source_path"] == "docs/api/migration.md"
+    assert result[0]["source_commit"] == first.applied_commit
+    rejected = _call_recall(uuid.uuid4(), "Original")["error"]
+    assert rejected["code"] == -32602
+    assert "不匹配" in rejected["message"]
+
+    _write(source, "docs/api/migration.md", "# Migration\n\nReplacement.\n")
+    _commit(source, "replace team document")
+    second = apply.apply_plan(target, _plan(source, target))
+    _write(
+        target,
+        ".repolens/index.yml",
+        "project_docs:\n  mode: allowlist\n  include: [docs/local.md]\n",
+    )
+    with pytest.raises(ValueError, match=MIRROR):
+        ensure_index(client, target, second.team_docs_digest)
+    assert _recall(repo_id, "Original") == result
+    assert _recall(repo_id, "Replacement") == []
+
+    (target / ".repolens/index.yml").unlink()
+    assert ensure_index(client, target, second.team_docs_digest) == repo_id
+    assert _recall(repo_id, "Original") == []
+    assert _recall(repo_id, "Replacement")[0]["source_commit"] == (
+        second.applied_commit
+    )
+
+    (source / "docs/api/migration.md").unlink()
+    _commit(source, "retire team document")
+    third = apply.apply_plan(target, _plan(source, target))
+    assert ensure_index(client, target, third.team_docs_digest) == repo_id
+    assert _recall(repo_id, "Replacement") == []
+    assert (target / "docs/local.md").is_file()
+
+
+def test_midscan_sync_cannot_publish_an_old_document_snapshot(
+    projects, index_service, monkeypatch
+):
+    source, target = projects
+    client, repo_id, sessions = index_service
+    first = apply.apply_plan(target, _plan(source, target))
+    ensure_index(client, target, first.team_docs_digest)
+    build_payloads = project_indexing._payloads_for_candidates
+
+    def update_during_scan(*args):
+        result = build_payloads(*args)
+        _write(source, "docs/api/migration.md", "# New\n\nReplacement.\n")
+        _commit(source, "update during scan")
+        apply.apply_plan(target, _plan(source, target))
+        return result
+
+    monkeypatch.setattr(
+        project_indexing, "_payloads_for_candidates", update_during_scan
+    )
+    with sessions() as db:
+        repo = db.get(Repository, repo_id)
+        state = project_indexing.scan_project_index(db, repo)
+    assert state["status"] == "failed"
+    assert state["summary_json"]["team_docs_digest"] == first.team_docs_digest
+    assert _recall(repo_id, "Replacement") == []

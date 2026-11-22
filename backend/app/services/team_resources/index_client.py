@@ -15,6 +15,7 @@ def local_api_url(value: str) -> str:
         or url.password is not None
         or url.query
         or url.fragment
+        or url.port == 0
     ):
         raise ValueError("请指定本机 RepoLens HTTP 地址")
     return value.rstrip("/")
@@ -60,7 +61,7 @@ def _wait_for_scan(
 
 def ensure_index(
     client: httpx.Client, target: Path, expected: str, wait: float = 20
-) -> None:
+) -> uuid.UUID:
     response = client.get("/api/repos")
     response.raise_for_status()
     repositories = response.json()
@@ -80,7 +81,7 @@ def ensure_index(
         client, endpoint, _fetch_state(client, endpoint), deadline
     )
     if _completed(state, expected):
-        return
+        return repo_id
     if state.get("status") == "building":
         raise ValueError("正在等待项目索引，稍后重试")
     response = client.post(f"{endpoint}/scan")
@@ -91,3 +92,4 @@ def ensure_index(
     if not _completed(state, expected):
         reason = state.get("error_message") or "尚未确认本次文档索引摘要"
         raise ValueError(str(reason))
+    return repo_id

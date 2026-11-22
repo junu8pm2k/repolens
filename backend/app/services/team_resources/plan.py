@@ -39,7 +39,9 @@ class Plan:
 
     @property
     def needs_write(self) -> bool:
-        return bool(self.changes or self.manifest != self.previous)
+        return bool(self.changes) or (
+            self.previous is not None and self.manifest != self.previous
+        )
 
 
 def _read_target(target: Path, path: str) -> bytes | None:

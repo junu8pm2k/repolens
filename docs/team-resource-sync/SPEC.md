@@ -4,10 +4,10 @@
 
 ## 命令接口
 
-拟议入口为 `scripts/sync_team_resources.py`，参数同时指定团队源仓库和本地目标项目。默认显示预览，收到确认后应用。`--preview` 返回计划后退出，保持目标文件、同步状态和项目索引原样。
+入口为 `scripts/sync_team_resources.py`，参数同时指定团队源仓库和本地目标项目。默认显示预览，收到确认后应用。`--preview` 返回计划后退出，保持目标文件、同步状态和项目索引原样。
 
 ```powershell
-python scripts/sync_team_resources.py --source 'C:\dev\team-resources' --target 'C:\dev\project' --preview
+.\backend\.venv\Scripts\python.exe scripts/sync_team_resources.py --source 'C:\dev\team-resources' --target 'C:\dev\project' --preview
 ```
 
 | 参数 | 约定 |
@@ -52,6 +52,8 @@ python scripts/sync_team_resources.py --source 'C:\dev\team-resources' --target 
 ### 清单与变更判定
 
 目标项目在 `.repolens/team-resource-sync/manifest.json` 保存 `schema_version`、规范化的源仓库根目录、最近一次应用的提交、文档镜像目录、预期文档摘要 `team_docs_digest`、文件阶段事务 ID 和受管理项。每项记录目标相对路径、资源类型、源路径及最后写入的 SHA-256。`AGENTS.md` 记录区块摘要和对应的多个源路径。文档条目还记录该内容版本的来源提交。源路径和内容相同的文档沿用原来源提交。
+
+同步工具在状态目录内生成 Git 忽略规则，将清单和恢复备份留在本机。
 
 | 情况 | 计划项 |
 | --- | --- |
@@ -106,6 +108,21 @@ CLI 将目标根目录与 `GET /api/repos` 返回的 `local_path` 规范化比�
 ```
 
 复用现有 MCP 文本传输，在 `content` 的 `text` 中返回上述 JSON 对象。参数错误沿用现有 JSON-RPC 错误码 `-32602`，消息区分无效参数和目标项目不匹配。现有通用证据工具继续使用自身的输出契约。 [检索结果](../../backend/app/services/chat_memory.py) · [MCP 工具入口](../../backend/app/mcp/memory_server.py)
+
+### 本地接入
+
+启动同机 RepoLens 后端并连接目标工作区。先带 `--preview` 运行命令，再去掉该参数并确认应用。索引完成后，命令会打印目标 RepoLens 项目 ID。
+
+将以下示例合入目标项目的受信任 Codex 配置 `.codex/config.toml`。把路径和项目 ID 换成本机实际值，并让 MCP 进程使用与 RepoLens 后端相同的数据库配置。开启新的 Codex CLI 会话后可调用 `recall`。 [Codex 本地 MCP 配置](https://learn.chatgpt.com/docs/extend/mcp?surface=cli#configure-with-configtoml)
+
+```toml
+[mcp_servers.repolens_recall]
+command = 'C:\dev\RepoLens AI\backend\.venv\Scripts\python.exe'
+args = ['app/mcp/memory_server.py']
+cwd = 'C:\dev\RepoLens AI\backend'
+env = { REPOLENS_RECALL_REPO_ID = '<同步命令打印的项目 UUID>' }
+enabled_tools = ['recall']
+```
 
 ## 验收用例
 

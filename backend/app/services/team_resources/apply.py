@@ -63,7 +63,7 @@ def _lock_file(handle: BinaryIO, lock: bool) -> None:
 
 
 @contextmanager
-def _project_lock(root: Path) -> Iterator[None]:
+def project_lock(root: Path) -> Iterator[None]:
     path = target_path(root, (STATE_DIR / "sync.lock").as_posix())
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
@@ -72,6 +72,9 @@ def _project_lock(root: Path) -> Iterator[None]:
         except OSError as exc:
             raise SyncConflict("目标项目已有同步操作在运行") from exc
         try:
+            ignore_path = (STATE_DIR / ".gitignore").as_posix()
+            if not target_path(root, ignore_path).exists():
+                _write(root, ignore_path, b"*\n")
             yield
         finally:
             _lock_file(handle, False)
@@ -115,7 +118,7 @@ def pending_journal(root: Path) -> Journal | None:
 
 
 def recover(root: Path, expected: Journal) -> None:
-    with _project_lock(root):
+    with project_lock(root):
         if pending_journal(root) != expected:
             raise SyncConflict("恢复记录发生变化，请重新预览")
         raw = read_file(root, MANIFEST_PATH.as_posix())
@@ -150,7 +153,7 @@ def apply_plan(root: Path, plan: Plan) -> Manifest:
         raise SyncConflict("目标存在冲突，未应用变更")
     if not plan.needs_write:
         return plan.manifest
-    with _project_lock(root):
+    with project_lock(root):
         if pending_journal(root) is not None:
             raise SyncConflict("目标项目有待恢复的同步操作")
         if read_file(root, MANIFEST_PATH.as_posix()) != plan.before or any(

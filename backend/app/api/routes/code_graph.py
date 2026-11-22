@@ -19,6 +19,7 @@ from app.services.code_search import (
     repository_checkout_path,
 )
 from app.services.permissions import require_permission
+from app.services.repository_records import repository_records
 from app.services.worktree_manager import pr_worktree_path
 
 router = APIRouter()
@@ -141,11 +142,10 @@ async def search_code_graph(
         selected_pr = db.get(PullRequest, pr_id)
     elif pr_number:
         selected_pr = (
-            db.query(PullRequest)
-            .filter(
-                PullRequest.repo_id == repo_id, PullRequest.number == pr_number
-            )
-            .one_or_none()
+            repository_records(db, PullRequest, repo_id)
+            .filter(PullRequest.number == pr_number)
+            .order_by(PullRequest.id)
+            .first()
         )
     if selected_pr and selected_pr.repo_id == repo_id:
         snapshot_path = pr_worktree_path(repo, selected_pr)

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -27,6 +28,9 @@ from app.services.github.pull_requests import (
     list_pull_request_review_comments,
     list_pull_requests,
 )
+from app.services.repository_records import REMOTE_IDS
+
+_sqlite_sync_lock = asyncio.Lock()
 
 
 def parse_github_datetime(value: str | None) -> datetime | None:
@@ -48,7 +52,48 @@ async def sync_repository(
             detail=f"{repo.provider} sync is not implemented yet",
         )
 
+    try:
+        if db.get_bind().dialect.name == "sqlite":
+            async with _sqlite_sync_lock:
+                return await _sync_repository(db, repo, payload)
+        # Keep manual, scheduled, and webhook syncs from inserting the same
+        # GitHub records concurrently. Never block the async server on a lock.
+        locked_repo_id = (
+            db.query(Repository.id)
+            .filter(Repository.id == repo.id)
+            .with_for_update(key_share=True, skip_locked=True)
+            .scalar()
+        )
+        if locked_repo_id is None:
+            raise HTTPException(
+                status_code=409, detail="仓库正在同步，请稍后刷新"
+            )
+        return await _sync_repository(db, repo, payload)
+    except (Exception, asyncio.CancelledError):
+        db.rollback()
+        raise
+
+
+def _find_record[Record: (Issue, PullRequest, WorkflowRun)](
+    db: Session, model: type[Record], repo_id: UUID, remote_id: int | None
+) -> Record | None:
+    if remote_id is None:
+        return None
+    # Match the row exposed by the workspace and keep historical IDs intact.
+    return (
+        db.query(model)
+        .filter(model.repo_id == repo_id, REMOTE_IDS[model] == remote_id)
+        .order_by(model.id)
+        .first()
+    )
+
+
+async def _sync_repository(
+    db: Session, repo: Repository, payload: RepoSyncRequest
+) -> RepoSyncResponse:
+    repo_id = repo.id
     synced = {"issues": 0, "pull_requests": 0, "workflow_runs": 0}
+    warnings: list[str] = []
     token = (
         decrypt_token(
             repo.github_token_encrypted, settings.token_encryption_key
@@ -76,26 +121,21 @@ async def sync_repository(
                 ),
             ) from exc
         for item in remote_issues:
-            issue = (
-                db.query(Issue)
-                .filter(
-                    Issue.repo_id == repo.id,
-                    Issue.github_issue_id == item.get("id"),
-                )
-                .one_or_none()
-            )
+            issue = _find_record(db, Issue, repo_id, item.get("id"))
             if issue is None:
                 issue = Issue(
-                    repo_id=repo.id,
+                    repo_id=repo_id,
                     github_issue_id=item.get("id"),
                     number=item.get("number", 0),
                     title=item.get("title") or "",
                 )
                 db.add(issue)
+                db.flush()
             issue.number = item.get("number", issue.number)
             issue.title = item.get("title") or issue.title
             issue.body = item.get("body")
             issue.state = item.get("state") or "open"
+            issue.state_reason = item.get("state_reason")
             issue.labels = [
                 label.get("name")
                 for label in item.get("labels", [])
@@ -130,17 +170,10 @@ async def sync_repository(
                 ),
             ) from exc
         for item in remote_prs:
-            pr = (
-                db.query(PullRequest)
-                .filter(
-                    PullRequest.repo_id == repo.id,
-                    PullRequest.github_pr_id == item.get("id"),
-                )
-                .one_or_none()
-            )
+            pr = _find_record(db, PullRequest, repo_id, item.get("id"))
             if pr is None:
                 pr = PullRequest(
-                    repo_id=repo.id,
+                    repo_id=repo_id,
                     github_pr_id=item.get("id"),
                     number=item.get("number", 0),
                     title=item.get("title") or "",
@@ -224,20 +257,20 @@ async def sync_repository(
                 limit=payload.limit,
                 base_url=base_url,
             )
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as exc:
             remote_runs = []
-        for item in remote_runs:
-            run = (
-                db.query(WorkflowRun)
-                .filter(
-                    WorkflowRun.repo_id == repo.id,
-                    WorkflowRun.github_run_id == item.get("id"),
-                )
-                .one_or_none()
+            warnings.append(
+                f"CI 同步失败（GitHub HTTP {exc.response.status_code}），"
+                "正在显示上次同步的记录。"
             )
+        except httpx.RequestError:
+            remote_runs = []
+            warnings.append("CI 同步失败，正在显示上次同步的记录。")
+        for item in remote_runs:
+            run = _find_record(db, WorkflowRun, repo_id, item.get("id"))
             if run is None:
                 run = WorkflowRun(
-                    repo_id=repo.id,
+                    repo_id=repo_id,
                     github_run_id=item.get("id"),
                     name=item.get("name") or "workflow",
                 )
@@ -248,6 +281,8 @@ async def sync_repository(
             run.html_url = item.get("html_url")
             run.created_at = parse_github_datetime(item.get("created_at"))
             run.updated_at = parse_github_datetime(item.get("updated_at"))
+            if run.id is None:
+                db.flush([run])
             if run.github_run_id:
                 try:
                     jobs = await list_workflow_run_jobs(
@@ -278,7 +313,7 @@ async def sync_repository(
                         }
                         for job in jobs
                     ]
-                except httpx.HTTPStatusError:
+                except httpx.HTTPError:
                     run.jobs = run.jobs or []
             if run.conclusion == "failure" and run.github_run_id:
                 try:
@@ -289,14 +324,20 @@ async def sync_repository(
                         token=token,
                         base_url=base_url,
                     )
-                except httpx.HTTPStatusError:
-                    run.logs_text = run.logs_text
+                except httpx.HTTPError:
+                    pass
             synced["workflow_runs"] += 1
 
-    repo.last_sync_at = datetime.now(timezone.utc)
+    if not warnings:
+        repo.last_sync_at = datetime.now(timezone.utc)
     db.flush()
     db.commit()
-    return RepoSyncResponse(repo_id=repo.id, status="completed", synced=synced)
+    return RepoSyncResponse(
+        repo_id=repo_id,
+        status="partial" if warnings else "completed",
+        synced=synced,
+        warnings=warnings,
+    )
 
 
 async def sync_repository_by_id(

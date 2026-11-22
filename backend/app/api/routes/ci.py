@@ -26,6 +26,7 @@ from app.services.chat_memory import ContextAssembler
 from app.services.code_search import search_repository_code
 from app.services.rag.indexing import sanitize_ci_log
 from app.services.rag.retrieval import search_similar_documents
+from app.services.repository_records import repository_records
 from app.services.worktree_manager import prepare_pr_worktree
 
 router = APIRouter()
@@ -740,8 +741,7 @@ async def list_workflow_runs(
     repo_id: UUID, db: Session = Depends(get_db)
 ) -> list[WorkflowRun]:
     return (
-        db.query(WorkflowRun)
-        .filter(WorkflowRun.repo_id == repo_id)
+        repository_records(db, WorkflowRun, repo_id)
         .order_by(WorkflowRun.created_at.desc())
         .all()
     )

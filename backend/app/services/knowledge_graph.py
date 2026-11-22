@@ -19,8 +19,10 @@ from app.db.models import (
     ThreadMemory,
     WorkflowRun,
 )
+from app.services.repository_records import repository_records
 
 GRAPH_NODE_LIMIT = 72
+REPOSITORY_FACT_NODE_TYPES = {"issue", "pull_request", "ci_run"}
 ISSUE_REF_RE = re.compile(r"(?<![A-Za-z])#(\d+)\b")
 CLOSING_ISSUE_RE = re.compile(
     r"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s+(?:issue\s+)?#(\d+)\b",
@@ -93,7 +95,7 @@ def rebuild_knowledge_graph(db: Session, repo: Repository) -> dict[str, int]:
         for edge in edges
     )
     db.commit()
-    nodes = _collect_nodes(db, repo.id)
+    nodes = _collect_nodes(db, repo.id, edges)
     return {"edges": len(edges), "nodes": len(nodes)}
 
 
@@ -105,21 +107,23 @@ def knowledge_graph_payload(
     center_id: str | None = None,
     depth: int = 1,
 ) -> dict[str, Any]:
-    edge_count = (
-        db.query(KnowledgeGraphEdge)
-        .filter(KnowledgeGraphEdge.repo_id == repo.id)
-        .count()
+    edge_query = db.query(KnowledgeGraphEdge).filter(
+        KnowledgeGraphEdge.repo_id == repo.id
     )
-    if edge_count == 0:
-        rebuild_knowledge_graph(db, repo)
-
-    nodes_by_key = _collect_nodes(db, repo.id)
-    edge_rows = (
-        db.query(KnowledgeGraphEdge)
-        .filter(KnowledgeGraphEdge.repo_id == repo.id)
-        .all()
-    )
-    edges = [_edge_payload(row) for row in edge_rows]
+    if repo.last_sync_at is not None:
+        edge_query = edge_query.filter(
+            KnowledgeGraphEdge.created_at >= repo.last_sync_at
+        )
+    edges = [_edge_payload(row) for row in edge_query]
+    if not edges:
+        edges = _generate_edges(db, repo.id)
+    nodes_by_key = _collect_nodes(db, repo.id, edges)
+    edges = [
+        edge
+        for edge in edges
+        if _node_key(edge["from_type"], edge["from_id"]) in nodes_by_key
+        and _node_key(edge["to_type"], edge["to_id"]) in nodes_by_key
+    ]
     center_key = None
     resolved_center_type = normalize_node_type(center_type)
     if resolved_center_type and center_id:
@@ -164,14 +168,11 @@ def knowledge_graph_payload(
 
 
 def _generate_edges(db: Session, repo_id: uuid.UUID) -> list[dict[str, Any]]:
-    issues = db.query(Issue).filter(Issue.repo_id == repo_id).all()
-    prs = db.query(PullRequest).filter(PullRequest.repo_id == repo_id).all()
-    runs = db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo_id).all()
+    issues = repository_records(db, Issue, repo_id).all()
+    prs = repository_records(db, PullRequest, repo_id).all()
+    runs = repository_records(db, WorkflowRun, repo_id).all()
     pr_files = (
-        db.query(PRFile)
-        .join(PullRequest, PRFile.pr_id == PullRequest.id)
-        .filter(PullRequest.repo_id == repo_id)
-        .all()
+        db.query(PRFile).filter(PRFile.pr_id.in_([pr.id for pr in prs])).all()
     )
     docs = _document_groups(db, repo_id)
 
@@ -463,7 +464,7 @@ def _add_text_reference_edges(
 
 
 def _collect_nodes(
-    db: Session, repo_id: uuid.UUID
+    db: Session, repo_id: uuid.UUID, edges: list[dict[str, Any]] | None = None
 ) -> dict[str, dict[str, Any]]:
     nodes: dict[str, dict[str, Any]] = {}
 
@@ -492,7 +493,7 @@ def _collect_nodes(
             "highlighted": highlighted,
         }
 
-    for issue in db.query(Issue).filter(Issue.repo_id == repo_id).all():
+    for issue in repository_records(db, Issue, repo_id):
         put(
             "issue",
             str(issue.id),
@@ -504,9 +505,8 @@ def _collect_nodes(
                 "assignees": issue.assignees or [],
             },
         )
-    for pr in (
-        db.query(PullRequest).filter(PullRequest.repo_id == repo_id).all()
-    ):
+    prs = repository_records(db, PullRequest, repo_id).all()
+    for pr in prs:
         subtitle = "merged" if pr.merged_at else pr.state
         put(
             "pull_request",
@@ -519,9 +519,7 @@ def _collect_nodes(
                 "head_branch": pr.head_branch,
             },
         )
-    for run in (
-        db.query(WorkflowRun).filter(WorkflowRun.repo_id == repo_id).all()
-    ):
+    for run in repository_records(db, WorkflowRun, repo_id):
         put(
             "ci_run",
             str(run.id),
@@ -562,10 +560,7 @@ def _collect_nodes(
             )
 
     for pr_file in (
-        db.query(PRFile)
-        .join(PullRequest, PRFile.pr_id == PullRequest.id)
-        .filter(PullRequest.repo_id == repo_id)
-        .all()
+        db.query(PRFile).filter(PRFile.pr_id.in_([pr.id for pr in prs])).all()
     ):
         put(
             "code_file",
@@ -603,17 +598,24 @@ def _collect_nodes(
             },
         )
 
-    for edge in (
-        db.query(KnowledgeGraphEdge)
-        .filter(KnowledgeGraphEdge.repo_id == repo_id)
-        .all()
-    ):
-        from_key = _node_key(edge.from_type, edge.from_id)
-        to_key = _node_key(edge.to_type, edge.to_id)
-        nodes.setdefault(
-            from_key, _fallback_node(edge.from_type, edge.from_id)
-        )
-        nodes.setdefault(to_key, _fallback_node(edge.to_type, edge.to_id))
+    if edges is None:
+        edges = [
+            _edge_payload(row)
+            for row in db.query(KnowledgeGraphEdge).filter(
+                KnowledgeGraphEdge.repo_id == repo_id
+            )
+        ]
+    for edge in edges:
+        for node_type, node_id in (
+            (edge["from_type"], edge["from_id"]),
+            (edge["to_type"], edge["to_id"]),
+        ):
+            normalized_type = normalize_node_type(node_type)
+            if normalized_type not in REPOSITORY_FACT_NODE_TYPES:
+                nodes.setdefault(
+                    _node_key(node_type, node_id),
+                    _fallback_node(node_type, node_id),
+                )
 
     return nodes
 

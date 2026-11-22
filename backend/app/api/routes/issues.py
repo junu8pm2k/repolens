@@ -20,6 +20,7 @@ from app.services.agents.issue_agent import IssueAgent
 from app.services.chat_memory import ContextAssembler
 from app.services.code_search import search_repository_code
 from app.services.rag.retrieval import search_similar_documents
+from app.services.repository_records import repository_records
 
 router = APIRouter()
 
@@ -395,8 +396,7 @@ async def list_issues(
     repo_id: UUID, db: Session = Depends(get_db)
 ) -> list[Issue]:
     return (
-        db.query(Issue)
-        .filter(Issue.repo_id == repo_id)
+        repository_records(db, Issue, repo_id)
         .order_by(Issue.number.desc())
         .all()
     )

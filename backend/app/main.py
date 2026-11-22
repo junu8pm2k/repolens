@@ -216,6 +216,18 @@ def create_app() -> FastAPI:
                             )
                         )
                     )
+        if "issues" in inspector.get_table_names():
+            columns = {
+                column["name"] for column in inspector.get_columns("issues")
+            }
+            if "state_reason" not in columns:
+                with engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE issues ADD COLUMN "
+                            "state_reason VARCHAR(50)"
+                        )
+                    )
         if "workflow_runs" in inspector.get_table_names():
             columns = {
                 column["name"]

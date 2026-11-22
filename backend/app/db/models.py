@@ -176,6 +176,7 @@ class Issue(Base):
     title: Mapped[str] = mapped_column(String(500))
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
     state: Mapped[str] = mapped_column(String(50), default="open")
+    state_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
     author: Mapped[str | None] = mapped_column(String(200), nullable=True)
     assignees: Mapped[list[str]] = mapped_column(JSON, default=list)

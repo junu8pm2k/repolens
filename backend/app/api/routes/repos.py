@@ -431,8 +431,8 @@ async def connect_repo(
                 if effective_demo_mode
                 else (
                     "Repository connection verified. Initial Issue/PR/CI "
-                    "sync completed; code checkout and graph analysis "
-                    "started."
+                    f"sync {sync_result.status}; code checkout and graph "
+                    "analysis started."
                 )
             )
         ),
@@ -442,6 +442,7 @@ async def connect_repo(
         synced=sync_result.synced
         if sync_result
         else {"issues": 0, "pull_requests": 0, "workflow_runs": 0},
+        warnings=sync_result.warnings if sync_result else [],
     )
 
 

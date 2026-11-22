@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.schemas.analysis import CIDebugOutput
 
@@ -19,6 +19,11 @@ class WorkflowRunResponse(BaseModel):
     updated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("jobs", mode="before")
+    @classmethod
+    def default_empty_jobs(cls, value):
+        return [] if value is None else value
 
 
 class CIAnalysisResponse(BaseModel):

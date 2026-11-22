@@ -52,6 +52,7 @@ class RepoConnectResponse(BaseModel):
     message: str
     sync_status: str = "not_started"
     synced: dict[str, int] | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class RepoSyncRequest(BaseModel):
@@ -65,3 +66,4 @@ class RepoSyncResponse(BaseModel):
     repo_id: UUID
     status: str
     synced: dict[str, int]
+    warnings: list[str] = Field(default_factory=list)

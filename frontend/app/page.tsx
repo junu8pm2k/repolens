@@ -60,6 +60,7 @@ type Issue = {
   number: number;
   title: string;
   state: string;
+  state_reason?: string | null;
   labels?: string[];
   body?: string | null;
   author?: string | null;
@@ -247,6 +248,7 @@ type RepoConnectResult = {
   message: string;
   sync_status?: string;
   synced?: Record<string, number>;
+  warnings?: string[];
 };
 
 type ProjectConversation = {
@@ -535,6 +537,14 @@ type PromptSuggestionState = {
 const workspaceTabs = ["Issue", "PR", "CI", "团队", "记忆&知识库", "技能&MCP", "图谱"] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
 type WorkspaceListTab = "Issue" | "PR" | "CI";
+type WorkspaceRecords = {
+  repoId: string;
+  issues: Issue[] | null;
+  prs: PullRequest[] | null;
+  runs: WorkflowRun[] | null;
+  errors: Partial<Record<WorkspaceListTab, string>>;
+};
+const emptyWorkspaceItems: never[] = [];
 type WorkspaceStatusFilter = { repoId: string | undefined; tab: WorkspaceTab; value: string };
 const linkedWorkspaceTabs = new Map<string, WorkspaceTab>([
   ["issues", "Issue"],
@@ -839,17 +849,14 @@ const issueCategoryMeta = [
   { key: "unanswered", label: "未回复", color: "text-rose-600" },
   { key: "discussing", label: "讨论中", color: "text-sky-600" },
   { key: "decision", label: "待决策", color: "text-amber-600" },
-  { key: "accepted", label: "已处理", color: "text-emerald-600" },
-  { key: "rejected", label: "已拒绝", color: "text-slate-500" },
-  { key: "closed", label: "已关闭", color: "text-slate-400" }
+  { key: "handled", label: "已处理", color: "text-emerald-600" },
+  { key: "rejected", label: "已拒绝", color: "text-slate-500" }
 ] as const;
 
 const prCategoryMeta = [
-  { key: "reviewing", label: "审核中", color: "text-sky-600" },
-  { key: "needsOwner", label: "需主审", color: "text-amber-600" },
-  { key: "conflict", label: "有冲突", color: "text-rose-600" },
-  { key: "done", label: "已完成", color: "text-emerald-600" },
-  { key: "rejected", label: "已拒绝", color: "text-slate-500" }
+  { key: "open", label: "开放", color: "text-sky-600" },
+  { key: "merged", label: "已合并", color: "text-emerald-600" },
+  { key: "closed", label: "已关闭（未合并）", color: "text-slate-500" }
 ] as const;
 
 const SIDEBAR_WIDTH = 288;
@@ -878,9 +885,9 @@ function WorkspaceDashboard() {
   const [conversationMap, setConversationMap] = useState<Record<string, ProjectConversation[]>>({});
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [expandedRepoIds, setExpandedRepoIds] = useState<Record<string, boolean>>({});
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [prs, setPrs] = useState<PullRequest[]>([]);
-  const [runs, setRuns] = useState<WorkflowRun[]>([]);
+  const [workspaceRecords, setWorkspaceRecords] = useState<WorkspaceRecords | null>(null);
+  const workspaceRequest = useRef(0);
+  const [syncNotice, setSyncNotice] = useState<{ repoId: string; message: string } | null>(null);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(linkedTab);
@@ -894,9 +901,9 @@ function WorkspaceDashboard() {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [teamRoster, setTeamRoster] = useState<{ repoId: string; members: TeamMember[]; error: string | null } | null>(null);
   const teamRequest = useRef(0);
-  const [memoryNotes, setMemoryNotes] = useState<MemoryNote[]>([]);
   const [memoryDraft, setMemoryDraft] = useState<MemoryNoteDraft>({ title: "", content: "" });
-  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
+  const [projectKnowledge, setProjectKnowledge] = useState<{ repoId: string; items: KnowledgeItem[]; error: string | null } | null>(null);
+  const knowledgeRequest = useRef(0);
   const [uploadingKnowledge, setUploadingKnowledge] = useState(false);
   const [mcpRuntime, setMcpRuntime] = useState<McpRuntime | null>(null);
   const [skills, setSkills] = useState<SkillResponse[]>([]);
@@ -965,11 +972,22 @@ function WorkspaceDashboard() {
 
   const selectedRepo = useMemo(() => repos.find((repo) => repo.id === selectedRepoId) ?? repos[0], [repos, selectedRepoId]);
   const workspaceRepoId = selectedRepo?.id;
+  const currentRecords = workspaceRecords?.repoId === workspaceRepoId ? workspaceRecords : null;
+  const issues = currentRecords?.issues ?? emptyWorkspaceItems;
+  const prs = currentRecords?.prs ?? emptyWorkspaceItems;
+  const runs = currentRecords?.runs ?? emptyWorkspaceItems;
+  const currentKnowledge = projectKnowledge?.repoId === workspaceRepoId ? projectKnowledge : null;
+  const knowledgeItems = currentKnowledge?.items ?? emptyWorkspaceItems;
+  const memoryNotes = knowledgeItems
+    .filter((item) => item.source_type === "memory_note")
+    .map((item) => ({ id: item.id, title: item.title, content: item.content_preview }));
   const selectedTeamRoster = teamRoster?.repoId === workspaceRepoId ? teamRoster : null;
   const teamMembers = selectedTeamRoster?.members ?? [];
   const workspaceStatus = workspaceStatusFilter?.repoId === workspaceRepoId && workspaceStatusFilter?.tab === workspaceTab
     ? workspaceStatusFilter.value
     : "all";
+  const workspaceListTab = workspaceTab === "Issue" || workspaceTab === "PR" || workspaceTab === "CI" ? workspaceTab : null;
+  const workspaceLoadError = workspaceListTab ? currentRecords?.errors[workspaceListTab] : undefined;
   const hasRepository = Boolean(selectedRepo);
   useEffect(() => {
     setWorkspaceTab(linkedWorkspaceTabs.get(view ?? "") ?? "Issue");
@@ -1017,15 +1035,25 @@ function WorkspaceDashboard() {
   }
 
   async function loadRepoData(repoId: string) {
-    const [issueItems, prItems, runItems] = await Promise.all([
-      apiGet<Issue[]>(`/api/repos/${repoId}/issues`).catch(() => []),
-      apiGet<PullRequest[]>(`/api/repos/${repoId}/pull-requests`).catch(() => []),
-      apiGet<WorkflowRun[]>(`/api/repos/${repoId}/workflow-runs`).catch(() => [])
-    ]);
     if (activeRepositoryId.current !== repoId) return;
-    setIssues(issueItems);
-    setPrs(prItems);
-    setRuns(runItems);
+    const request = ++workspaceRequest.current;
+    const [issueItems, prItems, runItems] = await Promise.allSettled([
+      apiGet<Issue[]>(`/api/repos/${repoId}/issues`),
+      apiGet<PullRequest[]>(`/api/repos/${repoId}/pull-requests`),
+      apiGet<WorkflowRun[]>(`/api/repos/${repoId}/workflow-runs`)
+    ]);
+    if (activeRepositoryId.current !== repoId || request !== workspaceRequest.current) return;
+    const errors: WorkspaceRecords["errors"] = {};
+    if (issueItems.status === "rejected") errors.Issue = getFriendlyError(issueItems.reason);
+    if (prItems.status === "rejected") errors.PR = getFriendlyError(prItems.reason);
+    if (runItems.status === "rejected") errors.CI = getFriendlyError(runItems.reason);
+    setWorkspaceRecords({
+      repoId,
+      issues: issueItems.status === "fulfilled" ? issueItems.value : null,
+      prs: prItems.status === "fulfilled" ? prItems.value : null,
+      runs: runItems.status === "fulfilled" ? runItems.value : null,
+      errors
+    });
   }
 
   async function loadSkillRuntime() {
@@ -1448,21 +1476,17 @@ function WorkspaceDashboard() {
   }, []);
 
   const loadProjectKnowledge = useCallback(async (repoId: string) => {
+    if (activeRepositoryId.current !== repoId) return;
+    const request = ++knowledgeRequest.current;
     const [, knowledge] = await Promise.all([
       loadTeamRoster(repoId),
-      apiGet<KnowledgeItem[]>(`/api/repos/${repoId}/knowledge`).catch(() => [])
+      apiGet<KnowledgeItem[]>(`/api/repos/${repoId}/knowledge`).then(
+        (items) => ({ items, error: null }),
+        (error: unknown) => ({ items: emptyWorkspaceItems, error: getFriendlyError(error) })
+      )
     ]);
-    if (activeRepositoryId.current !== repoId) return;
-    setKnowledgeItems(knowledge);
-    setMemoryNotes(
-      knowledge
-        .filter((item) => item.source_type === "memory_note")
-        .map((item) => ({
-          id: item.id,
-          title: item.title,
-          content: item.content_preview
-      }))
-    );
+    if (activeRepositoryId.current !== repoId || request !== knowledgeRequest.current) return;
+    setProjectKnowledge({ repoId, ...knowledge });
   }, [loadTeamRoster]);
 
   function updateTeamRoster(repoId: string, update: (members: TeamMember[]) => TeamMember[]) {
@@ -1726,11 +1750,6 @@ function WorkspaceDashboard() {
 
   useEffect(() => {
     if (selectedRepo?.id) {
-      setIssues([]);
-      setPrs([]);
-      setRuns([]);
-      setKnowledgeItems([]);
-      setMemoryNotes([]);
       loadRepoData(selectedRepo.id);
       loadProjectKnowledge(selectedRepo.id);
       loadProjectIndexState(selectedRepo.id);
@@ -1740,8 +1759,8 @@ function WorkspaceDashboard() {
       }
     } else {
       setTeamRoster(null);
-      setMemoryNotes([]);
-      setKnowledgeItems([]);
+      setWorkspaceRecords(null);
+      setProjectKnowledge(null);
       setKnowledgeGraphByRepo({});
       setSelectedGraphNodeKey(null);
       setMessages([]);
@@ -1974,7 +1993,6 @@ function WorkspaceDashboard() {
   async function removeMemoryNote(noteId: string) {
     if (!selectedRepo) return;
     await apiDelete(`/api/repos/${selectedRepo.id}/knowledge/${noteId}?source_type=memory_note`);
-    setMemoryNotes((items) => items.filter((item) => item.id !== noteId));
     await loadProjectKnowledge(selectedRepo.id);
     await loadKnowledgeGraph(selectedRepo.id);
   }
@@ -2002,14 +2020,19 @@ function WorkspaceDashboard() {
 
   async function refreshSelectedRepo() {
     if (!selectedRepo) return;
+    const repoId = selectedRepo.id;
     setSyncing(true);
+    setSyncNotice(null);
     try {
-      await apiPost(`/api/repos/${selectedRepo.id}/sync`, {
+      const result = await apiPost<{ warnings?: string[] }>(`/api/repos/${repoId}/sync`, {
         sync_issues: true,
         sync_pull_requests: true,
         sync_workflow_runs: true,
         limit: 50
       });
+      if (result.warnings?.length) {
+        setSyncNotice({ repoId, message: result.warnings.join(" ") });
+      }
       await Promise.all([
         loadRepos(),
         loadRepoData(selectedRepo.id),
@@ -2024,6 +2047,8 @@ function WorkspaceDashboard() {
         return next;
       });
       await loadPromptSuggestions(selectedRepo.id);
+    } catch (error) {
+      setSyncNotice({ repoId, message: `刷新失败。当前展示已同步的记录。 ${getFriendlyError(error)}` });
     } finally {
       setSyncing(false);
     }
@@ -2088,7 +2113,7 @@ function WorkspaceDashboard() {
       setProjectToken("");
       const synced = connected.synced ?? {};
       const syncDetail =
-        connected.sync_status === "completed"
+        connected.sync_status === "completed" || connected.sync_status === "partial"
           ? `已同步 ${synced.issues ?? 0} 个 Issue、${synced.pull_requests ?? 0} 个 PR、${synced.workflow_runs ?? 0} 条 CI 记录`
           : connected.sync_status === "fallback"
             ? `已使用本地缓存模式连接。${connected.message}`
@@ -2097,7 +2122,7 @@ function WorkspaceDashboard() {
       setAddProjectStatus({
         type: "success",
         title: "连接成功",
-        detail: `${connected.full_name} 已添加为当前项目，${syncDetail}。${codePathDetail}。`
+        detail: `${connected.full_name} 已添加为当前项目，${syncDetail}。${codePathDetail}。 ${(connected.warnings ?? []).join(" ")}`.trim()
       });
     } catch (error) {
       setAddProjectStatus({
@@ -2141,9 +2166,6 @@ function WorkspaceDashboard() {
     if (selectedRepoId === repo.id) {
       setSelectedRepoId(remainingRepos[0]?.id || "");
       setSelectedConversationId(remainingRepos[0] ? conversationMap[remainingRepos[0].id]?.[0]?.id || "" : "");
-      setIssues([]);
-      setPrs([]);
-      setRuns([]);
       setMessages([]);
     }
   }
@@ -2546,25 +2568,24 @@ function WorkspaceDashboard() {
   }
 
   const ownerOptions = useMemo(() => {
-    const people = new Set<string>();
-    issues.forEach((issue) => {
-      issue.assignees?.forEach((assignee) => people.add(assignee));
-      if (issue.author) people.add(issue.author);
-    });
-    prs.forEach((pr) => {
-      if (pr.author) people.add(pr.author);
-    });
+    const names = workspaceTab === "PR"
+      ? prs.flatMap((pr) => pr.author ? [pr.author] : [])
+      : issues.flatMap((issue) => issue.assignees ?? []);
+    const people = new Set(names);
     return Array.from(people).sort((a, b) => a.localeCompare(b));
-  }, [issues, prs]);
+  }, [issues, prs, workspaceTab]);
+  const ciStatuses = useMemo(
+    () => Array.from(new Set(runs.map(workflowRunStatus))).sort(),
+    [runs]
+  );
 
   const filteredIssues = useMemo(
     () =>
       issues.filter((issue) => {
-        const people = [...(issue.assignees ?? []), issue.author ?? ""];
         return (
-          matchesQuery(workspaceQuery, [issue.title, issue.body, issue.state, ...(issue.labels ?? [])]) &&
+          matchesQuery(workspaceQuery, [`#${issue.number}`, issue.title, issue.body, issue.state, ...(issue.labels ?? [])]) &&
           matchesIssueStatus(workspaceStatus, issue) &&
-          matchesOwner(workspaceOwner, people) &&
+          matchesOwner(workspaceOwner, issue.assignees ?? []) &&
           matchesTime(workspaceTime, issue.updated_at ?? issue.created_at)
         );
       }),
@@ -2574,10 +2595,10 @@ function WorkspaceDashboard() {
   const filteredPrs = useMemo(
     () =>
       prs.filter((pr) => {
-        const derivedStatus = pr.merged_at ? "merged" : pr.state;
+        const derivedStatus = pullRequestStatus(pr);
         const fileNames = pr.files?.map((file) => file.filename) ?? [];
         return (
-          matchesQuery(workspaceQuery, [pr.title, pr.body, derivedStatus, pr.author, pr.base_branch, pr.head_branch, ...fileNames]) &&
+          matchesQuery(workspaceQuery, [`#${pr.number}`, pr.title, pr.body, derivedStatus, pr.author, pr.base_branch, pr.head_branch, ...fileNames]) &&
           matchesStatus(workspaceStatus, derivedStatus) &&
           matchesOwner(workspaceOwner, [pr.author ?? ""]) &&
           matchesTime(workspaceTime, pr.updated_at ?? pr.created_at ?? pr.merged_at)
@@ -2589,20 +2610,19 @@ function WorkspaceDashboard() {
   const filteredRuns = useMemo(
     () =>
       runs.filter((run) => {
-        const derivedStatus = run.conclusion ?? run.status;
         return (
           matchesQuery(workspaceQuery, [run.name, run.status, run.conclusion, run.logs_text]) &&
-          matchesStatus(workspaceStatus, derivedStatus) &&
+          matchesStatus(workspaceStatus, workflowRunStatus(run)) &&
           matchesTime(workspaceTime, run.updated_at ?? run.created_at)
         );
       }),
     [runs, workspaceQuery, workspaceStatus, workspaceTime]
   );
 
-  const openIssues = issues.filter((item) => item.state === "open");
-  const openPrs = prs.filter((item) => item.state === "open" && !item.merged_at);
-  const failedRuns = runs.filter((item) => (item.conclusion ?? item.status) === "failure");
-  const mergedPrs = prs.filter((item) => item.merged_at);
+  const openIssues = issues.filter((item) => matchesIssueStatus("open", item));
+  const openPrs = prs.filter((item) => pullRequestStatus(item) === "open");
+  const failedRuns = runs.filter((item) => workflowRunStatus(item) === "failure");
+  const mergedPrs = prs.filter((item) => pullRequestStatus(item) === "merged");
   const rejectedIssues = issues.filter((item) => matchesIssueStatus("rejected", item));
   const handledIssues = issues.filter((item) => matchesIssueStatus("handled", item));
   const selectedIssue = selectedWorkspaceItem?.type === "issue" ? issues.find((item) => item.id === selectedWorkspaceItem.id) : undefined;
@@ -2618,7 +2638,7 @@ function WorkspaceDashboard() {
   );
   const metrics: Array<{ icon: LucideIcon; label: string; value: number; tab: WorkspaceListTab; status: string }> = [
     { icon: ListTodo, label: "待处理 Issue", value: openIssues.length, tab: "Issue", status: "open" },
-    { icon: GitPullRequest, label: "待 Review", value: openPrs.length, tab: "PR", status: "open" },
+    { icon: GitPullRequest, label: "开放 PR", value: openPrs.length, tab: "PR", status: "open" },
     { icon: CheckCircle2, label: "已处理 Issue", value: handledIssues.length, tab: "Issue", status: "handled" },
     { icon: XCircle, label: "已拒绝 Issue", value: rejectedIssues.length, tab: "Issue", status: "rejected" },
     { icon: AlertTriangle, label: "失败 CI", value: failedRuns.length, tab: "CI", status: "failure" },
@@ -2807,6 +2827,9 @@ function WorkspaceDashboard() {
                 {selectedConversation && (
                   <span className="rounded-full bg-panel px-2 py-0.5 text-[11px] text-slate-500">会话：{selectedConversation.title}</span>
                 )}
+                {selectedRepo?.last_sync_at && (
+                  <span className="text-[11px] text-slate-500">最近同步 {formatDate(selectedRepo.last_sync_at)}</span>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2.5">
@@ -2825,7 +2848,7 @@ function WorkspaceDashboard() {
                 key={label}
                 icon={icon}
                 label={label}
-                value={value}
+                value={currentRecords && !currentRecords.errors[tab] ? value : null}
                 danger={tab === "CI"}
                 active={workspaceTab === tab && workspaceStatus === status && !hasWorkspaceDetail}
                 disabled={!selectedRepo}
@@ -2877,20 +2900,33 @@ function WorkspaceDashboard() {
           </div>
 
           <div id="workspace-panel" ref={workspacePanelRef} className="min-h-0 flex-1 overflow-y-auto p-4">
-          {!hasWorkspaceDetail && (workspaceTab === "Issue" || workspaceTab === "PR" || workspaceTab === "CI") && (
+          {syncNotice?.repoId === workspaceRepoId && syncNotice && (
+            <p role="alert" className="mb-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{syncNotice.message}</p>
+          )}
+          {!hasWorkspaceDetail && workspaceListTab && !selectedRepo && (
+            <EmptyWorkspaceState label="选择仓库后查看记录" />
+          )}
+          {!hasWorkspaceDetail && workspaceListTab && selectedRepo && !currentRecords && (
+            <EmptyWorkspaceState label="正在加载仓库记录…" />
+          )}
+          {!hasWorkspaceDetail && workspaceLoadError && (
+            <p role="alert" className="rounded-md bg-rose-50 p-2 text-xs text-rose-800">读取 {workspaceTab} 失败。{workspaceLoadError}</p>
+          )}
+          {!hasWorkspaceDetail && workspaceListTab && currentRecords && !workspaceLoadError && (
             <WorkspaceControls
               query={workspaceQuery}
               status={workspaceStatus}
               owner={workspaceOwner}
               time={workspaceTime}
               owners={ownerOptions}
-              activeTab={workspaceTab}
+              activeTab={workspaceListTab}
+              ciStatuses={ciStatuses}
               onQueryChange={(value) => {
                 setWorkspaceQuery(value);
                 setSelectedWorkspaceItem(null);
               }}
               onStatusChange={(value) => {
-                setWorkspaceStatusFilter({ repoId: workspaceRepoId, tab: workspaceTab, value });
+                setWorkspaceStatusFilter({ repoId: workspaceRepoId, tab: workspaceListTab, value });
                 setSelectedWorkspaceItem(null);
               }}
               onOwnerChange={(value) => {
@@ -2920,7 +2956,7 @@ function WorkspaceDashboard() {
             />
           )}
 
-          {!hasWorkspaceDetail && workspaceTab === "Issue" && (
+          {!hasWorkspaceDetail && currentRecords?.issues && workspaceTab === "Issue" && (
             <div className="mt-4 space-y-3">
               {filteredIssues.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 Issue" />}
               {issueCategoryMeta.map((category) => {
@@ -2950,11 +2986,11 @@ function WorkspaceDashboard() {
             </div>
           )}
 
-          {!hasWorkspaceDetail && workspaceTab === "PR" && (
+          {!hasWorkspaceDetail && currentRecords?.prs && workspaceTab === "PR" && (
             <div className="mt-4 space-y-3">
               {filteredPrs.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 PR" />}
               {prCategoryMeta.map((category) => {
-                const items = filteredPrs.filter((item) => classifyPr(item) === category.key);
+                const items = filteredPrs.filter((item) => pullRequestStatus(item) === category.key);
                 if (items.length === 0 && (workspaceStatus !== "all" || filteredPrs.length === 0)) return null;
                 const groupKey = `pr-${category.key}`;
                 return (
@@ -2968,7 +3004,7 @@ function WorkspaceDashboard() {
                     items={items.map((item) => ({
                       id: item.id,
                       title: `#${item.number} ${item.title}`,
-                      meta: item.merged_at ? "merged" : item.state,
+                      meta: pullRequestStatus(item),
                       detail: item.body,
                       badges: [item.author, item.head_branch].filter(Boolean) as string[],
                       selected: selectedWorkspaceItem?.type === "pr" && selectedWorkspaceItem.id === item.id,
@@ -2980,7 +3016,7 @@ function WorkspaceDashboard() {
             </div>
           )}
 
-          {!hasWorkspaceDetail && workspaceTab === "CI" && (
+          {!hasWorkspaceDetail && currentRecords?.runs && workspaceTab === "CI" && (
             <div className="mt-4 space-y-2">
               {filteredRuns.length === 0 && <EmptyWorkspaceState label="暂无符合条件的 Workflow Run" />}
               {filteredRuns.map((item) => (
@@ -2989,8 +3025,9 @@ function WorkspaceDashboard() {
                   item={{
                     id: item.id,
                     title: item.name,
-                    meta: item.conclusion || item.status,
+                    meta: workflowRunStatus(item),
                     detail: item.logs_text,
+                    badges: item.created_at ? [formatDate(item.created_at)] : undefined,
                     selected: selectedWorkspaceItem?.type === "ci" && selectedWorkspaceItem.id === item.id,
                     onClick: () => setSelectedWorkspaceItem({ type: "ci", id: item.id })
                   }}
@@ -3015,10 +3052,13 @@ function WorkspaceDashboard() {
 
           {!hasWorkspaceDetail && workspaceTab === "记忆&知识库" && (
             <MemoryHubWorkspace
+              key={workspaceRepoId}
               repoId={selectedRepo?.id}
               notes={memoryNotes}
               draft={memoryDraft}
               knowledgeItems={knowledgeItems}
+              knowledgeLoading={Boolean(workspaceRepoId && !currentKnowledge)}
+              knowledgeError={currentKnowledge?.error ?? null}
               uploading={uploadingKnowledge}
               onDraftChange={setMemoryDraft}
               onAddNote={addMemoryNote}
@@ -4620,13 +4660,13 @@ function MetricCard({
 }: {
   icon: LucideIcon;
   label: string;
-  value: number;
+  value: number | null;
   danger: boolean;
   active: boolean;
   disabled: boolean;
   onClick: () => void;
 }) {
-  const iconTone = danger && value > 0 ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
+  const iconTone = danger && (value ?? 0) > 0 ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600";
   return (
     <button
       type="button"
@@ -4643,7 +4683,7 @@ function MetricCard({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[11px] leading-4 text-slate-500">{label}</span>
-        <span className="mt-0.5 block text-lg font-semibold leading-none tracking-tight text-ink">{value}</span>
+        <span className="mt-0.5 block text-lg font-semibold leading-none tracking-tight text-ink">{value ?? "—"}</span>
       </span>
       <ChevronRight aria-hidden="true" className="hidden h-3.5 w-3.5 shrink-0 text-indigo-500 sm:block 2xl:hidden" />
     </button>
@@ -4657,6 +4697,7 @@ function WorkspaceControls({
   time,
   owners,
   activeTab,
+  ciStatuses,
   onQueryChange,
   onStatusChange,
   onOwnerChange,
@@ -4667,7 +4708,8 @@ function WorkspaceControls({
   owner: string;
   time: string;
   owners: string[];
-  activeTab: WorkspaceTab;
+  activeTab: WorkspaceListTab;
+  ciStatuses: string[];
   onQueryChange: (value: string) => void;
   onStatusChange: (value: string) => void;
   onOwnerChange: (value: string) => void;
@@ -4687,17 +4729,20 @@ function WorkspaceControls({
       <div className="grid grid-cols-3 gap-2">
         <SelectFilter value={status} onChange={onStatusChange} label="状态">
           <option value="all">全部状态</option>
-          <option value="open">open</option>
-          <option value="closed">closed</option>
+          {activeTab !== "CI" && <option value="open">{activeTab === "Issue" ? "待处理" : "开放"}</option>}
+          {activeTab === "PR" && <option value="closed">已关闭（未合并）</option>}
           {activeTab === "Issue" && <option value="handled">已处理</option>}
           {activeTab === "Issue" && <option value="rejected">已拒绝</option>}
           {activeTab === "PR" && <option value="merged">已合并</option>}
           {activeTab === "CI" && <option value="failure">失败</option>}
           {activeTab === "CI" && <option value="success">成功</option>}
+          {activeTab === "CI" && ciStatuses.filter((value) => value !== "failure" && value !== "success").map((value) => (
+            <option key={value} value={value}>{value}</option>
+          ))}
         </SelectFilter>
-        <SelectFilter value={owner} onChange={onOwnerChange} label="负责人" disabled={activeTab === "CI"}>
-          <option value="all">全部负责人</option>
-          <option value="unassigned">未分配</option>
+        <SelectFilter value={owner} onChange={onOwnerChange} label={activeTab === "PR" ? "作者" : "负责人"} disabled={activeTab === "CI"}>
+          <option value="all">{activeTab === "PR" ? "全部作者" : "全部负责人"}</option>
+          <option value="unassigned">{activeTab === "PR" ? "无作者" : "未分配"}</option>
           {owners.map((item) => (
             <option key={item} value={item}>
               {item}
@@ -4829,8 +4874,7 @@ function WorkspaceDetail({
   const [showSource, setShowSource] = useState(false);
   const title = issue ? `#${issue.number} ${issue.title}` : pr ? `#${pr.number} ${pr.title}` : run?.name ?? "";
   const body = run?.logs_text ? markdownCodeBlock(run.logs_text) : issue?.body ?? pr?.body;
-  const status = issue?.state ?? (pr?.merged_at ? "merged" : pr?.state) ?? run?.conclusion ?? run?.status ?? "";
-  const owner = issue?.assignees?.join(", ") || issue?.author || pr?.author || "未分配";
+  const status = issue?.state ?? (pr ? pullRequestStatus(pr) : run ? workflowRunStatus(run) : "");
   const updatedAt = issue?.updated_at ?? issue?.created_at ?? pr?.updated_at ?? pr?.created_at ?? run?.updated_at ?? run?.created_at;
 
   return (
@@ -4878,7 +4922,8 @@ function WorkspaceDetail({
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <MetaPill label="状态" value={status} />
-        <MetaPill label="负责人" value={owner} />
+        {issue && <MetaPill label="负责人" value={issue.assignees?.join(", ") || "未分配"} />}
+        {pr && <MetaPill label="作者" value={pr.author || "无"} />}
         <MetaPill label="更新时间" value={formatDate(updatedAt)} />
       </div>
       {(issue?.labels?.length ?? 0) > 0 && (
@@ -5013,6 +5058,8 @@ function MemoryHubWorkspace({
   notes,
   draft,
   knowledgeItems,
+  knowledgeLoading,
+  knowledgeError,
   uploading,
   onDraftChange,
   onAddNote,
@@ -5025,6 +5072,8 @@ function MemoryHubWorkspace({
   notes: MemoryNote[];
   draft: MemoryNoteDraft;
   knowledgeItems: KnowledgeItem[];
+  knowledgeLoading: boolean;
+  knowledgeError: string | null;
   uploading: boolean;
   onDraftChange: (value: MemoryNoteDraft) => void;
   onAddNote: () => void;
@@ -5151,6 +5200,13 @@ function MemoryHubWorkspace({
 
   return (
     <div className="space-y-4">
+      {knowledgeError && (
+        <div className="rounded-md bg-rose-50 p-2 text-xs text-rose-800">
+          <p role="alert">读取知识库失败。{knowledgeError}</p>
+          <button type="button" onClick={onRefreshKnowledge} className="mt-1 font-medium underline">重试</button>
+        </div>
+      )}
+      {knowledgeLoading && <p role="status" className="text-xs text-slate-500">正在加载知识库…</p>}
       <div className="flex gap-1 overflow-x-auto rounded-lg border border-line bg-panel p-1">
         {tabs.map((tab) => (
           <button
@@ -6158,31 +6214,29 @@ function graphStatNumber(graph: KnowledgeGraphResponse | null, key: string, fall
 
 function classifyIssue(issue: Issue) {
   const labels = (issue.labels ?? []).map((label) => label.toLowerCase());
-  const text = `${issue.title} ${issue.body ?? ""}`.toLowerCase();
-  if (labels.some((label) => ["rejected", "wontfix", "invalid", "duplicate"].includes(label)) || text.includes("reject")) return "rejected";
-  if (labels.some((label) => ["accepted", "resolved", "done", "fixed"].includes(label))) return "accepted";
-  if (issue.state === "closed") return "closed";
+  if (issue.state === "closed") {
+    if (issue.state_reason === "completed") return "handled";
+    if (issue.state_reason === "not_planned" || issue.state_reason === "duplicate") return "rejected";
+    return labels.some((label) => ["rejected", "wontfix", "invalid", "duplicate"].includes(label))
+      ? "rejected"
+      : "handled";
+  }
   if (labels.some((label) => ["decision", "needs-decision", "rfc", "proposal"].includes(label))) return "decision";
   if ((issue.assignees?.length ?? 0) === 0 && !issue.body) return "unanswered";
   if (labels.length === 0 && (issue.assignees?.length ?? 0) === 0) return "unanswered";
   return "discussing";
 }
 
-function classifyPr(pr: PullRequest) {
-  if (pr.merged_at) return "done";
-  const text = `${pr.title} ${pr.body ?? ""} ${(pr.files ?? []).map((file) => file.patch ?? file.filename).join(" ")}`.toLowerCase();
-  if (pr.state === "closed") return "rejected";
-  if (text.includes("conflict")) return "conflict";
-  if (!pr.author) return "needsOwner";
-  return "reviewing";
+function pullRequestStatus(pr: PullRequest) {
+  return pr.merged_at ? "merged" : pr.state;
+}
+
+function workflowRunStatus(run: WorkflowRun) {
+  return run.conclusion || run.status;
 }
 
 function matchesIssueStatus(filter: string, issue: Issue) {
-  if (filter === "handled") {
-    const category = classifyIssue(issue);
-    return category === "accepted" || category === "closed";
-  }
-  if (filter === "rejected") return classifyIssue(issue) === "rejected";
+  if (filter === "handled" || filter === "rejected") return classifyIssue(issue) === filter;
   return matchesStatus(filter, issue.state);
 }
 

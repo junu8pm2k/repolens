@@ -10,7 +10,13 @@ async def list_pull_requests(
 ) -> list[dict]:
     client = GitHubClient(token, base_url)
     return await client.get(
-        f"/repos/{owner}/{repo}/pulls", {"state": "all", "per_page": limit}
+        f"/repos/{owner}/{repo}/pulls",
+        {
+            "state": "all",
+            "sort": "updated",
+            "direction": "desc",
+            "per_page": limit,
+        },
     )
 
 

@@ -24,6 +24,7 @@ from app.services.agents.pr_review_agent import PRReviewAgent
 from app.services.chat_memory import ContextAssembler
 from app.services.code_search import search_repository_code
 from app.services.rag.retrieval import search_similar_documents
+from app.services.repository_records import repository_records
 from app.services.worktree_manager import (
     cleanup_pr_snapshots,
     prepare_pr_worktree,
@@ -707,12 +708,11 @@ async def list_pull_requests(
     repo_id: UUID, db: Session = Depends(get_db)
 ) -> list[PullRequest]:
     return (
-        db.query(PullRequest)
+        repository_records(db, PullRequest, repo_id)
         .options(
             selectinload(PullRequest.files),
             selectinload(PullRequest.review_comments),
         )
-        .filter(PullRequest.repo_id == repo_id)
         .order_by(PullRequest.number.desc())
         .all()
     )

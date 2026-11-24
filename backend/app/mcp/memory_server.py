@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import asyncio
 import json
-import os
 import sys
 import traceback
 import uuid
@@ -18,11 +17,9 @@ from app.db.models import Conversation, Repository  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.services.chat_memory import MemoryTools  # noqa: E402
 from app.services.conversations import ensure_conversation  # noqa: E402
-from app.services.rag.retrieval import search_similar_documents  # noqa: E402
 
 SERVER_NAME = "repolens-memory-mcp"
 SERVER_VERSION = "0.1.0"
-RECALL_BINDING_ENV = "REPOLENS_RECALL_REPO_ID"
 
 for stream in (sys.stdin, sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure"):
@@ -165,20 +162,6 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-RECALL_TOOL = {
-    "name": "recall",
-    "description": "检索当前项目同步的团队文档并返回仓库内来源路径和提交。",
-    "annotations": {"readOnlyHint": True},
-    "inputSchema": _json_schema(
-        {
-            "repo_id": {"type": "string", "format": "uuid"},
-            "query": {"type": "string", "minLength": 1},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 20},
-        },
-        ["repo_id", "query"],
-    ),
-}
-
 
 class McpError(Exception):
     def __init__(self, code: int, message: str) -> None:
@@ -224,58 +207,7 @@ def _repo_label(repo: Repository) -> str:
     return repo.full_name
 
 
-def _recall(args: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"repo_id", "query", "limit"}
-    query = args.get("query")
-    limit = args.get("limit", 5)
-    if (
-        args.keys() - allowed
-        or not isinstance(query, str)
-        or not query.strip()
-    ):
-        raise McpError(-32602, "recall 需要有效的查询参数")
-    if type(limit) is not int or not 1 <= limit <= 20:
-        raise McpError(-32602, "limit 必须为 1 至 20 的整数")
-    try:
-        requested = uuid.UUID(str(args.get("repo_id") or ""))
-    except ValueError as exc:
-        raise McpError(-32602, "repo_id 必须是有效的仓库 UUID") from exc
-    try:
-        bound = uuid.UUID(os.environ.get(RECALL_BINDING_ENV, ""))
-    except ValueError as exc:
-        raise McpError(-32602, "recall 尚未绑定到目标项目") from exc
-    if requested != bound:
-        raise McpError(-32602, "repo_id 与 recall 绑定的目标项目不匹配")
-
-    with SessionLocal() as db:
-        if db.get(Repository, bound) is None:
-            raise McpError(-32602, "recall 绑定的目标项目不存在")
-        hits = search_similar_documents(
-            db,
-            bound,
-            query.strip(),
-            source_type="project_doc",
-            metadata_filters={"team_shared": True},
-            limit=limit,
-            retrieval_method="fulltext",
-            apply_rerank=False,
-            apply_compression=False,
-        )
-    results = [
-        {
-            "title": hit["title"],
-            "snippet": hit["snippet"],
-            "source_path": hit["metadata"]["team_source_path"],
-            "source_commit": hit["metadata"]["team_source_commit"],
-        }
-        for hit in hits
-    ]
-    return _content(json.dumps({"results": results}, ensure_ascii=False))
-
-
 async def _call_memory_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    if name == "recall":
-        return _recall(args)
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -367,12 +299,7 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
         if method == "initialize":
             result = _initialize()
         elif method == "tools/list":
-            tools = (
-                [*TOOLS, RECALL_TOOL]
-                if os.environ.get(RECALL_BINDING_ENV)
-                else TOOLS
-            )
-            result = {"tools": tools}
+            result = {"tools": TOOLS}
         elif method == "tools/call":
             name = str(params.get("name") or "")
             arguments = params.get("arguments") or {}

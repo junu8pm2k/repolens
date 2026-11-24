@@ -54,6 +54,7 @@ import { graphViewBox, placeGraphLabels } from "@/lib/knowledge-graph-labels";
 import type { Repository, TeamMember } from "@/lib/types";
 import { FeedbackControls, type ChatFeedbackRecord } from "@/components/feedback-controls";
 import { AssigneeSettings } from "@/components/workspace/assignee-settings";
+import { PRReviewRules } from "@/components/workspace/pr-review-rules";
 
 type Issue = {
   id: string;
@@ -2902,6 +2903,9 @@ function WorkspaceDashboard() {
           <div id="workspace-panel" ref={workspacePanelRef} className="min-h-0 flex-1 overflow-y-auto p-4">
           {syncNotice?.repoId === workspaceRepoId && syncNotice && (
             <p role="alert" className="mb-3 rounded-md bg-amber-50 p-2 text-xs text-amber-800">{syncNotice.message}</p>
+          )}
+          {workspaceTab === "PR" && workspaceRepoId && (
+            <PRReviewRules key={workspaceRepoId} repoId={workspaceRepoId} />
           )}
           {!hasWorkspaceDetail && workspaceListTab && !selectedRepo && (
             <EmptyWorkspaceState label="选择仓库后查看记录" />

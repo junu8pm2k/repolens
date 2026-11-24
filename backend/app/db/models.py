@@ -58,6 +58,7 @@ class Repository(Base):
     default_branch: Mapped[str | None] = mapped_column(
         String(200), nullable=True
     )
+    pr_review_rules: Mapped[str | None] = mapped_column(Text, nullable=True)
     github_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

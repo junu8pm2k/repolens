@@ -1188,6 +1188,7 @@ def _build_engineering_workflow_runtime(
             **safe_context,
             **agent_skill_context("pr_review_agent.analyze_pr"),
             "repo_id": str(repo.id),
+            "repository_review_rules": repo.pr_review_rules,
             "ci_summary": {
                 "failed_runs": len(failed_runs),
                 "latest_failed_run": claimed_ci_run.name
@@ -1885,11 +1886,20 @@ def _build_conversation_tools(
                     for comment in pr.review_comments
                 ],
             },
-            agent_context(context) | {"repo_id": str(repo.id)},
+            agent_context(context)
+            | {
+                "repo_id": str(repo.id),
+                "repository_review_rules": repo.pr_review_rules,
+            },
         )
         test_suggestions = _join_items(
             result["test_suggestions"], "运行相关测试和核心流程检查。"
         )
+        repository_checklist = ""
+        if repo.pr_review_rules:
+            repository_checklist = "\n审查清单：" + _join_items(
+                result["review_checklist"], "待人工确认。"
+            )
         return {
             "route": "pr_review",
             "tool_calls": [
@@ -1903,7 +1913,7 @@ def _build_conversation_tools(
                 f"PR #{pr.number} 摘要：{result['summary']}\n\n主要风险："
                 f"{_join_items(result['risk_points'], '没有明显风险。')}\n测试"
                 f"建议："
-                f"{test_suggestions}"
+                f"{test_suggestions}{repository_checklist}"
             ),
             "citations": [
                 {"type": "pull_request", "id": str(pr.id), "title": pr.title}

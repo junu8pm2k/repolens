@@ -216,6 +216,13 @@ def create_app() -> FastAPI:
                             )
                         )
                     )
+                if "pr_review_rules" not in columns:
+                    connection.execute(
+                        text(
+                            "ALTER TABLE repositories ADD COLUMN "
+                            "pr_review_rules TEXT"
+                        )
+                    )
         if "issues" in inspector.get_table_names():
             columns = {
                 column["name"] for column in inspector.get_columns("issues")

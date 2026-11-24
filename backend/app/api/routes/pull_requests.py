@@ -308,6 +308,8 @@ def _build_pr_analysis_context(
         },
         "team_members": team_members,
     }
+    if repo is not None and repo.pr_review_rules:
+        context["repository_review_rules"] = repo.pr_review_rules
     counts = {
         "files": len(pr.files),
         "comments": len(pr.review_comments),
@@ -617,6 +619,15 @@ async def _pr_analysis_sse(
             db, pr, _query, context, counts, snapshot
         )
         context["plan"] = plan
+        if rules := context.get("repository_review_rules"):
+            yield _encode_sse(
+                "trace",
+                _trace_item(
+                    "tool",
+                    "读取仓库审查规则",
+                    f"已加载 {len(rules.splitlines())} 条仓库审查规则。",
+                ),
+            )
         sensitive_file_count = len(
             (context.get("diff_stats") or {}).get("sensitive_files") or []
         )

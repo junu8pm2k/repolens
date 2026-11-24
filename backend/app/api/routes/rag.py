@@ -26,6 +26,7 @@ from app.db.models import (
 )
 from app.db.session import get_db
 from app.schemas.rag import (
+    IndexedFileResponse,
     KnowledgeBaseConfigUpdate,
     KnowledgeBaseResponse,
     KnowledgeChunkResponse,
@@ -62,6 +63,7 @@ from app.services.rag.qa import (
 from app.services.rag.vector_store import delete_document_group
 
 router = APIRouter()
+INDEXED_FILE_TYPES = ("project_doc", "project_manifest")
 
 
 def _repo_or_404(db: Session, repo_id: uuid.UUID) -> Repository:
@@ -287,6 +289,70 @@ async def upload_document(
 
 
 @router.get(
+    "/repositories/{repo_id}/indexed-files",
+    response_model=list[IndexedFileResponse],
+)
+async def list_indexed_files(
+    repo_id: uuid.UUID, db: Session = Depends(get_db)
+) -> list[IndexedFileResponse]:
+    _repo_or_404(db, repo_id)
+    path = Document.meta["path"].as_string()
+    title = Document.meta["display_title"].as_string()
+    rows = (
+        db.query(
+            Document.source_id.label("id"),
+            Document.source_type,
+            func.min(path).label("path"),
+            func.coalesce(func.min(title), func.min(path)).label("title"),
+            func.count(Document.id).label("chunk_count"),
+        )
+        .filter(
+            Document.repo_id == repo_id,
+            Document.source_type.in_(INDEXED_FILE_TYPES),
+        )
+        .group_by(Document.source_id, Document.source_type)
+        .having(func.min(path).is_not(None))
+        .order_by(func.min(path), Document.source_id)
+        .all()
+    )
+    return [
+        IndexedFileResponse(
+            id=row.id,
+            path=row.path,
+            title=row.title,
+            source_type=row.source_type,
+            chunk_count=row.chunk_count,
+        )
+        for row in rows
+    ]
+
+
+@router.get(
+    "/repositories/{repo_id}/indexed-files/{file_id}/chunks",
+    response_model=list[KnowledgeChunkResponse],
+)
+async def list_indexed_file_chunks(
+    repo_id: uuid.UUID,
+    file_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> list[KnowledgeChunkResponse]:
+    _repo_or_404(db, repo_id)
+    rows = (
+        db.query(Document)
+        .filter(
+            Document.repo_id == repo_id,
+            Document.source_id == file_id,
+            Document.source_type.in_(INDEXED_FILE_TYPES),
+        )
+        .order_by(Document.created_at.asc(), Document.id.asc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="未找到索引文件")
+    return sorted(_chunk_responses(rows), key=lambda chunk: chunk.position)
+
+
+@router.get(
     "/repositories/{repo_id}/documents/{document_id}/chunks",
     response_model=list[KnowledgeChunkResponse],
 )
@@ -302,6 +368,10 @@ async def list_document_chunks(
         .order_by(Document.created_at.asc())
         .all()
     )
+    return _chunk_responses(rows)
+
+
+def _chunk_responses(rows: list[Document]) -> list[KnowledgeChunkResponse]:
     return [
         KnowledgeChunkResponse(
             id=row.id,

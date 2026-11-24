@@ -2,9 +2,12 @@ import os
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.routes.rag import list_indexed_file_chunks, list_indexed_files
 from app.db.models import Base, Document, EvidenceItem, Repository
 from app.services.knowledge_graph import _collect_nodes
 from app.services.project_indexing import (
@@ -35,7 +38,8 @@ def _write_allowlist_config(project) -> None:
     )
 
 
-def test_scan_project_index_writes_state_and_project_documents(
+@pytest.mark.asyncio
+async def test_scan_project_index_writes_state_and_project_documents(
     tmp_path, monkeypatch
 ) -> None:
     def fail_if_vector_runtime_is_used(*_args, **_kwargs):
@@ -61,7 +65,8 @@ def test_scan_project_index_writes_state_and_project_documents(
         "# Demo\n\nProject overview.", encoding="utf-8"
     )
     (project / "docs" / "ADR-001.md").write_text(
-        "# ADR 001\n\nUse FastAPI.", encoding="utf-8"
+        "# ADR 001\n\nUse FastAPI.\n\n## Details\n\n" + "Reason. " * 400,
+        encoding="utf-8",
     )
     (project / "package.json").write_text(
         '{"name":"demo","version":"1.0.0"}', encoding="utf-8"
@@ -131,6 +136,27 @@ def test_scan_project_index_writes_state_and_project_documents(
     assert not hasattr(project_doc, "embedding")
     assert manifest.meta["retrieval_mode"] == "direct"
     assert not hasattr(overview, "embedding")
+
+    files = await list_indexed_files(repo.id, db)
+    assert {file.path for file in files} == {
+        "README.md",
+        "docs/ADR-001.md",
+        "package.json",
+    }
+    adr = next(file for file in files if file.path == "docs/ADR-001.md")
+    assert adr.source_type == "project_doc"
+    assert (
+        next(file.source_type for file in files if file.path == "package.json")
+        == "project_manifest"
+    )
+    chunks = await list_indexed_file_chunks(repo.id, adr.id, db)
+    assert len(chunks) == adr.chunk_count > 1
+    assert [chunk.position for chunk in chunks] == list(
+        range(1, adr.chunk_count + 1)
+    )
+    assert any("Use FastAPI." in chunk.content for chunk in chunks)
+    with pytest.raises(HTTPException, match="未找到索引文件"):
+        await list_indexed_file_chunks(repo.id, overview.source_id, db)
 
 
 def test_project_index_state_reports_stale_when_files_change(tmp_path) -> None:

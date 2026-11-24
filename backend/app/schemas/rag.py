@@ -60,6 +60,14 @@ class KnowledgeChunkResponse(BaseModel):
     enabled: bool = True
 
 
+class IndexedFileResponse(BaseModel):
+    id: UUID
+    path: str
+    title: str
+    source_type: Literal["project_doc", "project_manifest"]
+    chunk_count: int
+
+
 class RAGQueryRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     top_k: int = Field(default=5, ge=1, le=10)

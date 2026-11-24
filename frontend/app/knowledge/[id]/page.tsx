@@ -1,12 +1,13 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Check,
+  ChevronRight,
   FileSearch,
   FileText,
   History,
@@ -24,13 +25,16 @@ import {
 } from "lucide-react";
 
 import { PageTitle } from "@/components/ui/card";
+import type { FilePreview, PreviewFile } from "@/components/rag/indexed-file-preview";
 import { RetrievalSettings } from "@/components/rag/retrieval-settings";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
+import { groupKnowledgeFiles, type FileDescription } from "@/lib/knowledge-file-categories";
 import {
   formatBytes,
   formatDate,
   formatNumber,
   statusLabel,
+  type IndexedFile,
   type KnowledgeBase,
   type KnowledgeChunk,
   type KnowledgeConfig,
@@ -43,6 +47,7 @@ import {
 type Tab = "documents" | "qa" | "retrieval" | "settings";
 
 const KnowledgeQuestions = dynamic(() => import("@/components/rag/knowledge-questions").then((module) => module.KnowledgeQuestions));
+const IndexedFilePreview = dynamic(() => import("@/components/rag/indexed-file-preview").then((module) => module.IndexedFilePreview));
 
 const tabs: { value: Tab; label: string; icon: typeof FileText }[] = [
   { value: "documents", label: "文档", icon: FileText },
@@ -96,10 +101,10 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
   const [questionsOpened, setQuestionsOpened] = useState(false);
   const [knowledge, setKnowledge] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
+  const [indexedFiles, setIndexedFiles] = useState<IndexedFile[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [config, setConfig] = useState<KnowledgeConfig | null>(null);
-  const [selectedDocument, setSelectedDocument] = useState<KnowledgeDocument | null>(null);
-  const [chunks, setChunks] = useState<KnowledgeChunk[]>([]);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
   const [query, setQuery] = useState("");
   const [retrieval, setRetrieval] = useState<RetrievalResponse | null>(null);
   const [history, setHistory] = useState<RetrievalHistory[]>([]);
@@ -114,13 +119,15 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
 
   const load = useCallback(async () => {
     const request = ++loadRequest.current;
-    const [base, docs] = await Promise.all([
+    const [base, docs, files] = await Promise.all([
       apiGet<KnowledgeBase>(`/api/rag/repositories/${id}`),
-      apiGet<KnowledgeDocument[]>(`/api/rag/repositories/${id}/documents`)
+      apiGet<KnowledgeDocument[]>(`/api/rag/repositories/${id}/documents`),
+      apiGet<IndexedFile[]>(`/api/rag/repositories/${id}/indexed-files`)
     ]);
     if (loadRequest.current !== request) return;
     setKnowledge(base);
     setDocuments(docs);
+    setIndexedFiles(files);
     setConfig((current) => current ?? base.config);
   }, [id]);
 
@@ -190,13 +197,14 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
     }
   }
 
-  async function openChunks(document: KnowledgeDocument) {
-    setSelectedDocument(document);
-    setChunks([]);
+  async function openChunks(file: PreviewFile) {
+    setPreview({ file, status: "loading" });
     try {
-      setChunks(await apiGet<KnowledgeChunk[]>(`/api/rag/repositories/${id}/documents/${document.id}/chunks`));
+      const chunks = await apiGet<KnowledgeChunk[]>(file.endpoint);
+      setPreview((current) => current?.file === file ? { file, status: "ready", chunks } : current);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "读取分段失败");
+      const message = reason instanceof Error ? reason.message : "读取分段失败";
+      setPreview((current) => current?.file === file ? { file, status: "error", message } : current);
     }
   }
 
@@ -213,7 +221,7 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
       } else {
         await apiDelete(path);
         setDocuments((current) => current.filter((item) => item.id !== document.id));
-        setSelectedDocument((current) => current?.id === document.id ? null : current);
+        setPreview((current) => current?.file.id === document.id ? null : current);
       }
       await load();
     } catch (reason) {
@@ -292,10 +300,10 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-81px)] flex-col">
+    <div className="flex min-h-[calc(100vh-81px)] shrink-0 flex-col">
       <PageTitle
         title={knowledge.name}
-        description={`${knowledge.full_name} · ${formatNumber(knowledge.document_count)} 文档 · ${formatNumber(knowledge.chunk_count)} 分段 · ${formatNumber(knowledge.character_count)} 字符`}
+        description={`${knowledge.full_name} · ${formatNumber(indexedFiles.length)} 个仓库文件 · ${formatNumber(documents.length)} 个上传文件`}
         actions={
           <Link
             href="/knowledge"
@@ -382,7 +390,7 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <h2 className="text-base font-semibold tracking-tight text-ink">文档</h2>
-                  <p className="mt-1 text-sm text-slate-500">查看解析状态和真实分段内容。</p>
+                  <p className="mt-1 text-sm text-slate-500">按文件路径和标题自动分组。打开卡片查看索引分段。</p>
                 </div>
                 <input ref={fileInput} type="file" multiple accept=".txt,.md,.markdown,.pdf,.docx,.json,.csv,.log" className="hidden" onChange={(event) => uploadFiles(event.target.files)} />
                 <div className="flex flex-wrap gap-2">
@@ -400,45 +408,71 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
                 </div>
               </div>
 
-              <div className="mt-5 overflow-hidden rounded-xl border border-line bg-white shadow-xs">
-                <div className="hidden grid-cols-[minmax(0,1fr)_90px_64px_64px_110px] gap-3 border-b border-line bg-panel px-4 py-2.5 pr-[5.5rem] text-xs font-medium text-slate-500 lg:grid">
-                  <span>名称</span><span>状态</span><span>分段</span><span>字符数</span><span>上传时间</span>
-                </div>
-                {documents.map((document) => (
-                  <div key={document.id} className="flex items-center border-b border-line last:border-b-0 hover:bg-panel">
-                    <button type="button" disabled={document.status !== "completed"} onClick={() => openChunks(document)} className="grid min-w-0 flex-1 gap-2 py-3 pl-4 text-left lg:grid-cols-[minmax(0,1fr)_90px_64px_64px_110px] lg:items-center lg:gap-3">
-                      <span className="flex min-w-0 items-center gap-2"><FileText className="h-4 w-4 shrink-0 text-indigo-600" /><span className="truncate text-sm font-medium text-ink">{document.name}</span></span>
-                      <span className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${document.status === "completed" ? "bg-emerald-50 text-emerald-700" : document.status === "failed" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>
-                        {statusLabel[document.status]}
-                      </span>
-                      <span className="text-xs text-slate-500"><span className="lg:hidden">分段 </span>{formatNumber(document.chunk_count)}</span>
-                      <span className="text-xs text-slate-500"><span className="lg:hidden">字符 </span>{formatNumber(document.character_count)}</span>
-                      <span className="text-xs text-slate-400">{formatDate(document.created_at)}</span>
-                    </button>
-                    <div className="flex w-[5.5rem] shrink-0 items-center justify-end gap-1 pr-4">
-                      {document.status === "failed" && (
-                        <button type="button" onClick={() => changeDocument(document, "retry")} disabled={Boolean(activeDocument) || indexing} aria-label={`重试 ${document.name}`} title="重试" className="grid h-8 w-8 place-items-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50">
-                          <RotateCcw className="h-4 w-4" />
-                        </button>
-                      )}
-                      <button type="button" onClick={() => changeDocument(document, "delete")} disabled={Boolean(activeDocument) || indexing || !["completed", "failed"].includes(document.status)} aria-label={`删除 ${document.name}`} title="删除文档" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                {!documents.length ? (
-                  <div className="p-3">
-                    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-panel/40 px-4 py-12 text-center">
-                      <span className="grid h-10 w-10 place-items-center rounded-lg border border-accent-line bg-accent-soft text-indigo-600">
-                        <FileText className="h-4 w-4" />
-                      </span>
-                      <p className="text-sm font-medium text-slate-600">还没有文档</p>
-                      <p className="text-xs leading-5 text-slate-400">添加 Markdown、PDF、DOCX、TXT 等资料，系统会自动解析并建立索引。</p>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+              <section className="mt-6" aria-labelledby="repository-files-heading">
+                <h3 id="repository-files-heading" className="text-sm font-semibold text-ink">仓库索引文件</h3>
+                {indexedFiles.length ? (
+                  <FileCardGroups
+                    files={indexedFiles}
+                    describe={(file) => ({ path: file.path, title: file.title, manifest: file.source_type === "project_manifest" })}
+                    renderCard={(file) => (
+                      <FileCard
+                        name={file.path.split("/").at(-1) || file.path}
+                        detail={file.path}
+                        chunks={file.chunk_count}
+                        onOpen={() => openChunks({
+                          id: file.id,
+                          name: file.title,
+                          filename: file.path,
+                          detail: `${file.path} · ${formatNumber(file.chunk_count)} 个分段`,
+                          endpoint: `/api/rag/repositories/${id}/indexed-files/${file.id}/chunks`
+                        })}
+                      />
+                    )}
+                  />
+                ) : (
+                  <p className="mt-3 rounded-lg border border-dashed border-line bg-panel/40 px-4 py-4 text-sm text-slate-500">还没有仓库索引文件。可在 Workspace 的「记忆&知识库」扫描项目文档。</p>
+                )}
+              </section>
+
+              <section className="mt-7" aria-labelledby="uploaded-files-heading">
+                <h3 id="uploaded-files-heading" className="text-sm font-semibold text-ink">上传文件</h3>
+                {documents.length ? (
+                  <FileCardGroups
+                    files={documents}
+                    describe={(document) => ({ path: document.name })}
+                    renderCard={(document) => (
+                      <FileCard
+                        name={document.name}
+                        detail={`${formatDate(document.created_at)} · ${formatNumber(document.character_count)} 字符`}
+                        chunks={document.chunk_count}
+                        errorMessage={document.error_message}
+                        status={document.status}
+                        onOpen={() => openChunks({
+                          id: document.id,
+                          name: document.name,
+                          filename: document.name,
+                          detail: `${formatNumber(document.chunk_count)} 个分段 · ${formatBytes(document.file_size)}`,
+                          endpoint: `/api/rag/repositories/${id}/documents/${document.id}/chunks`
+                        })}
+                        actions={(
+                          <>
+                            {document.status === "failed" && (
+                              <button type="button" onClick={() => changeDocument(document, "retry")} disabled={Boolean(activeDocument) || indexing} aria-label={`重试 ${document.name}`} title="重试" className="grid h-8 w-8 place-items-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                                <RotateCcw className="h-4 w-4" />
+                              </button>
+                            )}
+                            <button type="button" onClick={() => changeDocument(document, "delete")} disabled={Boolean(activeDocument) || indexing || !["completed", "failed"].includes(document.status)} aria-label={`删除 ${document.name}`} title="删除文档" className="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </>
+                        )}
+                      />
+                    )}
+                  />
+                ) : (
+                  <p className="mt-3 rounded-lg border border-dashed border-line bg-panel/40 px-4 py-4 text-sm text-slate-500">还没有上传文件。可以通过「添加文件」导入资料。</p>
+                )}
+              </section>
             </div>
           ) : null}
 
@@ -581,39 +615,72 @@ function KnowledgeBaseDetail({ id }: { id: string }) {
         </main>
       </div>
 
-      {selectedDocument ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-ink/30" onMouseDown={() => setSelectedDocument(null)}>
-          <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-line bg-white shadow-pop" onMouseDown={(event) => event.stopPropagation()}>
-            <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-line bg-white px-5 py-4">
-              <FileText className="h-5 w-5 text-indigo-600" />
-              <div className="min-w-0 flex-1">
-                <h2 className="truncate text-sm font-semibold text-ink">{selectedDocument.name}</h2>
-                <p className="text-xs text-slate-400">{selectedDocument.chunk_count} 个分段 · {formatBytes(selectedDocument.file_size)}</p>
-              </div>
-              <button title="关闭" onClick={() => setSelectedDocument(null)} className="grid h-8 w-8 place-items-center rounded-md text-slate-500 transition-colors hover:bg-panel hover:text-ink">
-                <X className="h-4 w-4" />
-              </button>
-            </header>
-            <div className="space-y-3 bg-panel/40 p-4 sm:p-5">
-              {chunks.map((chunk) => (
-                <article key={chunk.id} className="rounded-lg border border-line bg-white p-4 shadow-xs">
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-indigo-600">分段 #{chunk.position}</span>
-                    <span className="text-xs text-slate-400">{chunk.character_count} 字符</span>
-                  </div>
-                  <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">{chunk.content}</p>
-                </article>
-              ))}
-              {!chunks.length ? (
-                <div className="flex min-h-64 flex-col items-center justify-center gap-2 text-center">
-                  <LoaderCircle className="h-5 w-5 animate-spin text-slate-400" />
-                  <p className="text-sm text-slate-500">正在读取分段...</p>
-                </div>
-              ) : null}
-            </div>
-          </div>
+      {preview && <IndexedFilePreview preview={preview} onClose={() => setPreview(null)} onRetry={() => openChunks(preview.file)} />}
+    </div>
+  );
+}
+
+function FileCardGroups<T extends { id: string }>({ files, describe, renderCard }: {
+  files: readonly T[];
+  describe: (file: T) => FileDescription;
+  renderCard: (file: T) => ReactNode;
+}) {
+  return (
+    <div className="mt-3 divide-y divide-line">
+      {groupKnowledgeFiles(files, describe).map((group) => (
+        <div key={group.id} className="py-4 first:pt-0 last:pb-0">
+          <h4 className="flex items-baseline gap-2 text-sm font-medium text-slate-700">
+            {group.label}
+            <span className="text-xs font-normal text-slate-500">{formatNumber(group.files.length)} 个文件</span>
+          </h4>
+          <ul className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {group.files.map((file) => <li key={file.id}>{renderCard(file)}</li>)}
+          </ul>
         </div>
-      ) : null}
+      ))}
+    </div>
+  );
+}
+
+function FileCard({ name, detail, chunks, status, errorMessage, actions, onOpen }: {
+  name: string;
+  detail: string;
+  chunks: number;
+  status?: KnowledgeDocument["status"];
+  errorMessage?: string;
+  actions?: ReactNode;
+  onOpen: () => void;
+}) {
+  const canOpen = !status || status === "completed";
+  const tone = status === "completed" ? "text-emerald-700" : status === "failed" ? "text-rose-700" : "text-amber-700";
+
+  return (
+    <div className="h-full min-w-0 rounded-xl border border-line bg-white">
+      <button
+        type="button"
+        disabled={!canOpen}
+        onClick={onOpen}
+        className="flex w-full gap-3 rounded-xl p-3.5 text-left enabled:hover:bg-accent-soft/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-default"
+      >
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
+          <FileText aria-hidden="true" className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span title={name} className="block truncate text-sm font-semibold text-ink">{name}</span>
+          <span title={detail} className="mt-1 block truncate text-xs text-slate-500">{detail}</span>
+          <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+            <span>{formatNumber(chunks)} 个分段</span>
+            {status && <span className={tone}>{statusLabel[status]}</span>}
+          </span>
+        </span>
+        {canOpen && <ChevronRight aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />}
+      </button>
+      {actions && (
+        <div className="mx-3.5 flex items-center justify-end gap-1 border-t border-line py-1">
+          {errorMessage && <span title={errorMessage} className="mr-auto truncate text-xs text-rose-700">{errorMessage}</span>}
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

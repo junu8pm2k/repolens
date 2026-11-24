@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RepoConnectRequest(BaseModel):
@@ -67,3 +67,16 @@ class RepoSyncResponse(BaseModel):
     status: str
     synced: dict[str, int]
     warnings: list[str] = Field(default_factory=list)
+
+
+class RepoPRReviewRules(BaseModel):
+    rules: str = Field(max_length=4000)
+
+    @field_validator("rules")
+    @classmethod
+    def normalize_rules(cls, value: str) -> str:
+        if "\x00" in value:
+            raise ValueError("审查规则不能包含空字符")
+        return "\n".join(
+            line.strip() for line in value.splitlines() if line.strip()
+        )

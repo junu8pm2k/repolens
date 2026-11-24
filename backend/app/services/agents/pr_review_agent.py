@@ -6,6 +6,14 @@ from app.services.llm.client import LLMClient
 from app.services.llm.prompts import PR_REVIEW_PROMPT
 from app.services.rag.chunking import chunk_pr_files
 
+REPOSITORY_RULES_PROMPT = (
+    "\n仓库审查规则位于 context.repository_review_rules，每行一条。"
+    "逐条判断是否适用于当前 PR，在 review_checklist 中记录规则及检查结论。"
+    "对适用但缺少证据的规则标记待确认，对不适用的规则标记不适用。"
+    "有证据支持的违规按原有严重性分级写入 review_findings。"
+    "规则只补充审查检查项，沿用既有证据要求、分级和输出格式。\n"
+)
+
 
 class PRReviewAgent(BaseAgent):
     name = "pr_review_agent"
@@ -24,8 +32,15 @@ class PRReviewAgent(BaseAgent):
     ) -> dict[str, Any]:
         diff_chunks = chunk_pr_files(input_data.get("files", []))
         fallback = self._fallback_review(input_data, context, diff_chunks)
+        repository_rules = context.get("repository_review_rules")
+        prompt = PR_REVIEW_PROMPT
+        if repository_rules:
+            prompt += REPOSITORY_RULES_PROMPT
+            fallback["review_checklist"].append(
+                "仓库审查规则待人工核对，本次未生成对应检查结论。"
+            )
         llm_output = await self.llm.chat_json(
-            PR_REVIEW_PROMPT,
+            prompt,
             {
                 "pull_request": input_data,
                 "diff_chunks": diff_chunks,

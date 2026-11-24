@@ -43,6 +43,7 @@ from app.db.models import (
     Repository,
     RetrievalTestRun,
     ThreadMemory,
+    User,
     WorkflowRun,
     Workspace,
 )
@@ -50,12 +51,14 @@ from app.db.session import get_db
 from app.schemas.repos import (
     RepoConnectRequest,
     RepoConnectResponse,
+    RepoPRReviewRules,
     RepoResponse,
     RepoSyncRequest,
     RepoSyncResponse,
 )
 from app.services.code_analysis import sync_repository_code_analysis_by_id
 from app.services.github.client import GitHubClient
+from app.services.permissions import require_permission, write_audit_log
 from app.services.rag.vector_store import delete_milvus_documents
 from app.services.repos_sync import sync_repository
 
@@ -469,6 +472,43 @@ async def sync_repo(
     result = await sync_repository(db, repo, payload)
     background_tasks.add_task(sync_repository_code_analysis_by_id, repo.id)
     return result
+
+
+@router.get("/{repo_id}/pr-review-rules", response_model=RepoPRReviewRules)
+async def get_pr_review_rules(
+    repo_id: UUID,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("repo:read")),
+) -> RepoPRReviewRules:
+    repo = db.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="未找到仓库")
+    return RepoPRReviewRules(rules=repo.pr_review_rules or "")
+
+
+@router.patch("/{repo_id}/pr-review-rules", response_model=RepoPRReviewRules)
+async def save_pr_review_rules(
+    repo_id: UUID,
+    payload: RepoPRReviewRules,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_permission("settings:manage")),
+) -> RepoPRReviewRules:
+    repo = db.get(Repository, repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="未找到仓库")
+    if payload.rules != (repo.pr_review_rules or ""):
+        repo.pr_review_rules = payload.rules or None
+        write_audit_log(
+            db,
+            user=user,
+            repo_id=repo.id,
+            action="repo.pr_review_rules.update",
+            target_type="repository",
+            target_id=str(repo.id),
+            result_json={"rule_count": len(payload.rules.splitlines())},
+        )
+        db.commit()
+    return payload
 
 
 @router.post("/{repo_id}/select")

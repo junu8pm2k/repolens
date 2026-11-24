@@ -63,6 +63,14 @@ export type KnowledgeChunk = {
   enabled: boolean;
 };
 
+export type IndexedFile = {
+  id: string;
+  path: string;
+  title: string;
+  source_type: "project_doc" | "project_manifest";
+  chunk_count: number;
+};
+
 export type CatalogModel = {
   provider: string;
   model: string;
